@@ -6,114 +6,123 @@ using UnityVolumeRendering;
 
 public static class DicomToStlExporter
 {
-    // ============================  選單  ============================
+    // ============================  Menu Items  ============================
     [MenuItem("Tools/Export STL/STL (Binary)")]
-    private static void ExportDicomToStlBinary() =>
-        ExportDicomToStl(isBinary: true);
+    private static void ExportDicomToStlBinary() => ExportDicomToStl(true);
 
     [MenuItem("Tools/Export STL/STL (ASCII)")]
-    private static void ExportDicomToStlAscii() =>
-        ExportDicomToStl(isBinary: false);
+    private static void ExportDicomToStlAscii() => ExportDicomToStl(false);
 
-    // =======================  共用出口邏輯  =========================
+    // =======================  Shared Export Logic  =========================
     private static void ExportDicomToStl(bool isBinary)
     {
-        var sel = Selection.activeGameObject;
-        var vol = sel ? sel.GetComponent<VolumeRenderedObject>() : null;
-        if (vol == null)
+        var selectedObject = Selection.activeGameObject;
+        var volumeObject = selectedObject ? selectedObject.GetComponent<VolumeRenderedObject>() : null;
+        if (volumeObject == null)
         {
             EditorUtility.DisplayDialog("請先選取 DICOM 物件",
                 "在 Hierarchy 點選 VolumeRenderedObject 後再試一次。", "了解");
             return;
         }
 
-        // 取得體素 + 尺寸
-        VolumeDataset ds = vol.dataset;
-        float[] vox = ds.data;
-        int w = ds.dimX, h = ds.dimY, d = ds.dimZ;
+        // Get voxel data and dimensions
+        var dataset = volumeObject.dataset;
+        var voxels = dataset.data;
+        int width = dataset.dimX, height = dataset.dimY, depth = dataset.dimZ;
 
-        // 產等值面
-        Vector2 visibilityWindow = vol.GetVisibilityWindow();
-        float isoLevel = ds.GetMinDataValue() + visibilityWindow.x * (ds.GetMaxDataValue() - ds.GetMinDataValue());
-        Mesh mesh = IsoSurfaceGenerator.BuildMesh(vox, w, h, d, isoLevel);
+        // Generate isosurface mesh
+        var visibilityWindow = volumeObject.GetVisibilityWindow();
+        var isoLevel = dataset.GetMinDataValue() + visibilityWindow.x * (dataset.GetMaxDataValue() - dataset.GetMinDataValue());
+        
+        var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel);
         if (mesh.vertexCount == 0)
         {
             EditorUtility.DisplayDialog("產生失敗", "Mesh 為空，請調整 isoLevel。", "好");
             return;
         }
 
-        // 尺寸 + Pivot 修正
-        Vector3    trScale = vol.transform.lossyScale;
-        Quaternion trRot   = vol.transform.rotation * Quaternion.Euler(-90f, 0, 0);
-        MeshUtil.ApplyDatasetScaleAndCenter(mesh, ds, trScale, trRot);
+        // Apply scale and pivot correction
+        var transformScale = volumeObject.transform.lossyScale;
+        var transformRotation = volumeObject.transform.rotation * Quaternion.Euler(-90f, 0, 0);
+        MeshUtil.ApplyDatasetScaleAndCenter(mesh, dataset, transformScale, transformRotation);
 
-        // 讓用戶選檔名
-        string typeName = isBinary ? "Binary STL" : "ASCII STL";
-        string path = EditorUtility.SaveFilePanel($"匯出 {typeName}", Application.dataPath, sel.name + ".stl", "stl");
+        // Prompt user for the file path
+        var typeName = isBinary ? "Binary STL" : "ASCII STL";
+        var path = EditorUtility.SaveFilePanel($"匯出 {typeName}", Application.dataPath, selectedObject.name + ".stl", "stl");
         if (string.IsNullOrEmpty(path)) return;
 
-        // 輸出
-        if (isBinary)      WriteBinaryStl(mesh, path);
-        else               WriteAsciiStl (mesh, path);
+        // Export
+        if (isBinary)
+            WriteBinaryStl(mesh, path);
+        else
+            WriteAsciiStl(mesh, path);
 
         EditorUtility.DisplayDialog("匯出完成", $"{typeName} 已儲存：\n{path}", "OK");
     }
 
-    // =======================  Binary STL  ==========================
+    // =======================  Binary STL Export  ==========================
     private static void WriteBinaryStl(Mesh mesh, string filePath)
     {
-        var t = mesh.triangles;
-        var v = mesh.vertices;
-        var n = mesh.normals;
+        var triangles = mesh.triangles;
+        var vertices = mesh.vertices;
+        var normals = mesh.normals;
 
-        using var bw = new BinaryWriter(File.Open(filePath, FileMode.Create));
+        using var writer = new BinaryWriter(File.Open(filePath, FileMode.Create));
 
-        // header (80 bytes)
+        // Write 80-byte header
         var header = new byte[80];
         Encoding.ASCII.GetBytes("unity_volumerendering").CopyTo(header, 0);
-        bw.Write(header);
+        writer.Write(header);
 
-        // triangle count
-        bw.Write((uint)(t.Length / 3));
+        // Write triangle count
+        writer.Write((uint)(triangles.Length / 3));
 
-        // triangles
-        for (int i = 0; i < t.Length; i += 3)
+        // Write triangles
+        for (var i = 0; i < triangles.Length; i += 3)
         {
-            int a = t[i], b = t[i + 1], c = t[i + 2];
-            Vector3 normal = n.Length == v.Length ? n[a]
-                : Vector3.Cross(v[b] - v[a], v[c] - v[a]).normalized;
+            int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+            var normal = normals.Length == vertices.Length
+                ? normals[a]
+                : Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).normalized;
 
-            bw.Write(normal.x); bw.Write(normal.y); bw.Write(normal.z);
+            WriteVector3(writer, normal);
+            WriteVector3(writer, vertices[a]);
+            WriteVector3(writer, vertices[b]);
+            WriteVector3(writer, vertices[c]);
 
-            Vector3 v0 = v[a]; bw.Write(v0.x); bw.Write(v0.y); bw.Write(v0.z);
-            Vector3 v1 = v[b]; bw.Write(v1.x); bw.Write(v1.y); bw.Write(v1.z);
-            Vector3 v2 = v[c]; bw.Write(v2.x); bw.Write(v2.y); bw.Write(v2.z);
-
-            bw.Write((ushort)0); // attribute byte count
+            writer.Write((ushort)0); // attribute byte count
         }
     }
 
-    // ========================  ASCII STL  ==========================
+    private static void WriteVector3(BinaryWriter writer, Vector3 vector)
+    {
+        writer.Write(vector.x);
+        writer.Write(vector.y);
+        writer.Write(vector.z);
+    }
+
+    // ========================  ASCII STL Export  ==========================
     private static void WriteAsciiStl(Mesh mesh, string filePath)
     {
         var sb = new StringBuilder("solid unity_volumerendering\n");
-        int[]   t = mesh.triangles;
-        var   vtx = mesh.vertices;
-        var   nor = mesh.normals;
+        var triangles = mesh.triangles;
+        var vertices = mesh.vertices;
+        var normals = mesh.normals;
 
-        for (int i = 0; i < t.Length; i += 3)
+        for (var i = 0; i < triangles.Length; i += 3)
         {
-            int a = t[i], b = t[i + 1], c = t[i + 2];
-            Vector3 n = nor.Length == vtx.Length ? nor[a]
-                : Vector3.Cross(vtx[b] - vtx[a], vtx[c] - vtx[a]).normalized;
+            int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
+            var normal = normals.Length == vertices.Length
+                ? normals[a]
+                : Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).normalized;
 
-            sb.AppendLine($"  facet normal {n.x} {n.y} {n.z}");
-            sb.AppendLine("    outer loop");
-            sb.AppendLine($"      vertex {vtx[a].x} {vtx[a].y} {vtx[a].z}");
-            sb.AppendLine($"      vertex {vtx[b].x} {vtx[b].y} {vtx[b].z}");
-            sb.AppendLine($"      vertex {vtx[c].x} {vtx[c].y} {vtx[c].z}");
-            sb.AppendLine("    endloop");
-            sb.AppendLine("  endfacet");
+            sb.AppendLine($"facet normal {normal.x} {normal.y} {normal.z}");
+            sb.AppendLine("outer loop");
+            sb.AppendLine($"vertex {vertices[a].x} {vertices[a].y} {vertices[a].z}");
+            sb.AppendLine($"vertex {vertices[b].x} {vertices[b].y} {vertices[b].z}");
+            sb.AppendLine($"vertex {vertices[c].x} {vertices[c].y} {vertices[c].z}");
+            sb.AppendLine("endloop");
+            sb.AppendLine("endfacet");
         }
 
         sb.Append("endsolid unity_volumerendering");

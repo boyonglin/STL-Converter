@@ -4,48 +4,70 @@ using UnityVolumeRendering;
 public static class MeshUtil
 {
     /// <summary>
-    /// 把 Marching Cubes 網格：
-    /// 1. 轉到實體尺寸 (mm→m) 並套 Transform 縮放
-    /// 2. 套自訂旋轉（例如 -90°X）
-    /// 3. 消除「0.5 voxel 偏差」，讓 Pivot＝幾何中心
+    /// Transforms Marching Cubes mesh by:
+    /// 1. Converting to real-world dimensions (mm→m) and applying Transform scaling
+    /// 2. Applying custom rotation (e.g., -90°X)
+    /// 3. Eliminating "0.5 voxel offset" to center the pivot at the geometric center
     /// </summary>
+    /// <param name="mesh">The mesh to transform</param>
+    /// <param name="dataset">Volume dataset containing dimensions and scale</param>
+    /// <param name="extraScale">Additional scaling (e.g., vol.transform.lossyScale)</param>
+    /// <param name="extraRotation">Additional rotation (e.g., vol.transform.rotation * custom rotation)</param>
+    /// <param name="globalScale">Global scale factor: 1 = mm, 0.001 = m</param>
     public static void ApplyDatasetScaleAndCenter(
         Mesh mesh,
-        VolumeDataset ds,
-        Vector3 extraScale,            // vol.transform.lossyScale
-        Quaternion extraRot,           // vol.transform.rotation * 任何額外旋轉
-        float globalScale = 1f)        // 1 = mm，0.001 = m
+        VolumeDataset dataset,
+        Vector3 extraScale,
+        Quaternion extraRotation,
+        float globalScale = 1f)
     {
-        if (extraScale == Vector3.zero) extraScale = Vector3.one;
+        if (mesh == null || dataset == null)
+            return;
 
-        // ── 每 voxel 的實長度（含 globalScale） ──
-        Vector3 perVoxel = new(
-            ds.scale.x / ds.dimX,
-            ds.scale.y / ds.dimY,
-            ds.scale.z / ds.dimZ);
-        perVoxel *= globalScale;               // mm→m（如設 0.001）
-        perVoxel = Vector3.Scale(perVoxel, extraScale);
+        extraScale = extraScale == Vector3.zero ? Vector3.one : extraScale;
 
-        // ── 幾何中心位移 (dim-1)/2 × perVoxel ──
-        Vector3 halfCount = new(
-            (ds.dimX - 1) * 0.5f,
-            (ds.dimY - 1) * 0.5f,
-            (ds.dimZ - 1) * 0.5f);
-        Vector3 center = Vector3.Scale(perVoxel, halfCount);
-        center = extraRot * center;            // 旋轉到相同座標系
-
-        // ── 套用到所有頂點 ──
-        Vector3[] v = mesh.vertices;
-        for (int i = 0; i < v.Length; i++)
-        {
-            // voxel index → 真實座標
-            Vector3 p = Vector3.Scale(v[i], perVoxel);
-            p = extraRot * p;
-            v[i] = p - center;                 // 把 Pivot 挪到中心
-        }
-
-        mesh.vertices = v;
+        var voxelSize = CalculateVoxelSize(dataset, globalScale, extraScale);
+        var geometricCenter = CalculateGeometricCenter(dataset, voxelSize, extraRotation);
+        
+        TransformMeshVertices(mesh, voxelSize, extraRotation, geometricCenter);
+        
         mesh.RecalculateBounds();
         mesh.RecalculateNormals();
+    }
+
+    private static Vector3 CalculateVoxelSize(VolumeDataset dataset, float globalScale, Vector3 extraScale)
+    {
+        var voxelSize = new Vector3(
+            dataset.scale.x / dataset.dimX,
+            dataset.scale.y / dataset.dimY,
+            dataset.scale.z / dataset.dimZ);
+        
+        voxelSize *= globalScale;
+        return Vector3.Scale(voxelSize, extraScale);
+    }
+
+    private static Vector3 CalculateGeometricCenter(VolumeDataset dataset, Vector3 voxelSize, Quaternion rotation)
+    {
+        var halfDimensions = new Vector3(
+            (dataset.dimX - 1) * 0.5f,
+            (dataset.dimY - 1) * 0.5f,
+            (dataset.dimZ - 1) * 0.5f);
+        
+        var center = Vector3.Scale(voxelSize, halfDimensions);
+        return rotation * center;
+    }
+
+    private static void TransformMeshVertices(Mesh mesh, Vector3 voxelSize, Quaternion rotation, Vector3 center)
+    {
+        var vertices = mesh.vertices;
+        
+        for (var i = 0; i < vertices.Length; i++)
+        {
+            var worldPosition = Vector3.Scale(vertices[i], voxelSize);
+            worldPosition = rotation * worldPosition;
+            vertices[i] = worldPosition - center;
+        }
+        
+        mesh.vertices = vertices;
     }
 }
