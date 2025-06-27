@@ -130,13 +130,15 @@ public class MeshPreviewEditor : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
-        if (GUILayout.Button("Binary", GUILayout.ExpandWidth(true)))
+        var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
+                           ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
+        if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(true, Selection.activeGameObject.GetComponent<VolumeRenderedObject>());
+            StlExporter.Export(true, volumeObject);
         }
-        if (GUILayout.Button("ASCII", GUILayout.ExpandWidth(true)))
+        if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(false, Selection.activeGameObject.GetComponent<VolumeRenderedObject>());
+            StlExporter.Export(false, volumeObject);
         }
         EditorGUILayout.EndHorizontal();
     }
