@@ -28,9 +28,11 @@ These instructions will get you a copy of the project up and running on your loc
 
 ## Usage
 
-1. Select a the UI to select a DICOM serie1s
-4.  Adjust the isosurface threshold.
-5.  Click "Export to STL" to save the generated model.
+1.  Load a DICOM series.
+2.  Select a GameObject with the VolumeRenderedObject.
+3.  Adjust the visible value range.
+4.  Click Export STL to Binary or ASCII from Tools/Mesh Preview Editor.
+5.  Unity will automatically compile STL files in the Assets folder.
 
 ## Built With
 
