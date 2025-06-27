@@ -33,8 +33,9 @@ public static class DicomToStlExporter
         int w = ds.dimX, h = ds.dimY, d = ds.dimZ;
 
         // 產等值面
-        const float iso = 0.5f;
-        Mesh mesh = IsoSurfaceGenerator.BuildMesh(vox, w, h, d, iso);
+        Vector2 visibilityWindow = vol.GetVisibilityWindow();
+        float isoLevel = ds.GetMinDataValue() + visibilityWindow.x * (ds.GetMaxDataValue() - ds.GetMinDataValue());
+        Mesh mesh = IsoSurfaceGenerator.BuildMesh(vox, w, h, d, isoLevel);
         if (mesh.vertexCount == 0)
         {
             EditorUtility.DisplayDialog("產生失敗", "Mesh 為空，請調整 isoLevel。", "好");
