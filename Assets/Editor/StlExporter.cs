@@ -4,24 +4,18 @@ using UnityEditor;
 using UnityEngine;
 using UnityVolumeRendering;
 
-public static class DicomToStlExporter
+public static class StlExporter
 {
-    // ============================  Menu Items  ============================
-    [MenuItem("Tools/Export STL/STL (Binary)")]
-    private static void ExportDicomToStlBinary() => ExportDicomToStl(true);
-
-    [MenuItem("Tools/Export STL/STL (ASCII)")]
-    private static void ExportDicomToStlAscii() => ExportDicomToStl(false);
-
-    // =======================  Shared Export Logic  =========================
-    private static void ExportDicomToStl(bool isBinary)
+    /// <summary>
+    /// Exports a VolumeRenderedObject to an STL file.
+    /// </summary>
+    /// <param name="isBinary">True to export in binary format, false for ASCII.</param>
+    /// <param name="volumeObject">The VolumeRenderedObject to export.</param>
+    public static void Export(bool isBinary, VolumeRenderedObject volumeObject)
     {
-        var selectedObject = Selection.activeGameObject;
-        var volumeObject = selectedObject ? selectedObject.GetComponent<VolumeRenderedObject>() : null;
         if (volumeObject == null)
         {
-            EditorUtility.DisplayDialog("請先選取 DICOM 物件",
-                "在 Hierarchy 點選 VolumeRenderedObject 後再試一次。", "了解");
+            EditorUtility.DisplayDialog("Selection Error", "Please select a GameObject with a VolumeRenderedObject component.", "OK");
             return;
         }
 
@@ -37,7 +31,7 @@ public static class DicomToStlExporter
         var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel);
         if (mesh.vertexCount == 0)
         {
-            EditorUtility.DisplayDialog("產生失敗", "Mesh 為空，請調整 isoLevel。", "好");
+            EditorUtility.DisplayDialog("Generation Failed", "The generated mesh is empty. Please adjust the isoLevel.", "OK");
             return;
         }
 
@@ -48,7 +42,9 @@ public static class DicomToStlExporter
 
         // Prompt user for the file path
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
-        var path = EditorUtility.SaveFilePanel($"匯出 {typeName}", Application.dataPath, selectedObject.name + ".stl", "stl");
+        var baseName = volumeObject.name.Replace(".dcm", "");
+        var fileName = $"{baseName}{(isBinary ? "_binary" : "_ascii")}.stl";
+        var path = EditorUtility.SaveFilePanel($"Export {typeName}", Application.dataPath, fileName, "stl");
         if (string.IsNullOrEmpty(path)) return;
 
         // Export
@@ -57,10 +53,9 @@ public static class DicomToStlExporter
         else
             WriteAsciiStl(mesh, path);
 
-        EditorUtility.DisplayDialog("匯出完成", $"{typeName} 已儲存：\n{path}", "OK");
+        EditorUtility.DisplayDialog("Export Complete", $"{typeName} saved to:\n{path}", "OK");
     }
 
-    // =======================  Binary STL Export  ==========================
     private static void WriteBinaryStl(Mesh mesh, string filePath)
     {
         var triangles = mesh.triangles;
@@ -101,7 +96,6 @@ public static class DicomToStlExporter
         writer.Write(vector.z);
     }
 
-    // ========================  ASCII STL Export  ==========================
     private static void WriteAsciiStl(Mesh mesh, string filePath)
     {
         var sb = new StringBuilder("solid unity_volumerendering\n");
