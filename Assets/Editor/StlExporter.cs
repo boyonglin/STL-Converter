@@ -11,9 +11,10 @@ public static class StlExporter
     /// </summary>
     /// <param name="isBinary">True to export in binary format, false for ASCII.</param>
     /// <param name="volumeObject">The VolumeRenderedObject to export.</param>
-    public static void Export(bool isBinary, VolumeRenderedObject volumeObject)
+    /// <param name="doubleSided">True to create double-sided geometry.</param>
+    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false)
     {
-        if (volumeObject == null)
+        if (!volumeObject)
         {
             EditorUtility.DisplayDialog("Selection Error", "Please select a GameObject with a VolumeRenderedObject component.", "OK");
             return;
@@ -28,7 +29,7 @@ public static class StlExporter
         var visibilityWindow = volumeObject.GetVisibilityWindow();
         var isoLevel = dataset.GetMinDataValue() + visibilityWindow.x * (dataset.GetMaxDataValue() - dataset.GetMinDataValue());
         
-        var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel);
+        var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel, true, doubleSided);
         if (mesh.vertexCount == 0)
         {
             EditorUtility.DisplayDialog("Generation Failed", "The generated mesh is empty. Please adjust the isoLevel.", "OK");
@@ -42,8 +43,9 @@ public static class StlExporter
 
         // Prompt user for the file path
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
+        var suffix = doubleSided ? "_double" : "";
         var baseName = volumeObject.name.Replace(".dcm", "");
-        var fileName = $"{baseName}{(isBinary ? "_binary" : "_ascii")}.stl";
+        var fileName = $"{baseName}{(isBinary ? "_binary" : "_ascii")}{suffix}.stl";
         var path = EditorUtility.SaveFilePanel($"Export {typeName}", Application.dataPath, fileName, "stl");
         if (string.IsNullOrEmpty(path)) return;
 

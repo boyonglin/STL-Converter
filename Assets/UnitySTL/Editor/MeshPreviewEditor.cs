@@ -6,6 +6,7 @@ using UnityVolumeRendering;
 public class MeshPreviewEditor : EditorWindow
 {
     private PreviewRenderUtility previewRenderer;
+    private bool isDoubleSided = true;
 
     /// <summary>
     /// Initializes the preview renderer.
@@ -128,17 +129,23 @@ public class MeshPreviewEditor : EditorWindow
         EditorGUILayout.LabelField(Selection.activeGameObject.name, whiteTextStyle);
         EditorGUILayout.EndHorizontal();
 
+        // Add double-sided checkbox
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
+        isDoubleSided = EditorGUILayout.Toggle("Double-Sided", isDoubleSided);
+        EditorGUILayout.EndHorizontal();
+
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
         var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
                            ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
         if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(true, volumeObject);
+            StlExporter.Export(true, volumeObject, isDoubleSided);
         }
         if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(false, volumeObject);
+            StlExporter.Export(false, volumeObject, isDoubleSided);
         }
         EditorGUILayout.EndHorizontal();
     }
