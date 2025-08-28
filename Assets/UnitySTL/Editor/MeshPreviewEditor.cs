@@ -135,30 +135,39 @@ public class MeshPreviewEditor : EditorWindow
 
         // Select DICOM row
         EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("Select DICOM", whiteTextStyle, GUILayout.Width(88));
-        EditorGUILayout.LabelField(Selection.activeGameObject.name, whiteTextStyle);
-        EditorGUILayout.EndHorizontal();
+        try
+        {
+            EditorGUILayout.LabelField("Select DICOM", whiteTextStyle, GUILayout.Width(88));
+            EditorGUILayout.LabelField(Selection.activeGameObject.name, whiteTextStyle);
+        }
+        finally { EditorGUILayout.EndHorizontal(); }
 
         // Options row
         EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
-        isDoubleSided = EditorGUILayout.Toggle("Double-Sided", isDoubleSided);
-        EditorGUILayout.EndHorizontal();
+        try
+        {
+            EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
+            isDoubleSided = EditorGUILayout.Toggle("Double-Sided", isDoubleSided);
+        }
+        finally { EditorGUILayout.EndHorizontal(); }
 
         // Export STL row
         EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
-        var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
-                           ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
-        if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
+        try
         {
-            StlExporter.Export(true, volumeObject, isDoubleSided);
+            EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
+            var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
+                               ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
+            if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
+            {
+                StlExporter.Export(true, volumeObject, isDoubleSided);
+            }
+            if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
+            {
+                StlExporter.Export(false, volumeObject, isDoubleSided);
+            }
         }
-        if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
-        {
-            StlExporter.Export(false, volumeObject, isDoubleSided);
-        }
-        EditorGUILayout.EndHorizontal();
+        finally { EditorGUILayout.EndHorizontal(); }
     }
 
     private void DrawSelectedMesh(Mesh mesh, Material material, Transform transform)
