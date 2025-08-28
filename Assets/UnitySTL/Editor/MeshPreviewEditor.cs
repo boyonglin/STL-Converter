@@ -133,17 +133,19 @@ public class MeshPreviewEditor : EditorWindow
             normal = { textColor = Color.white }
         };
 
+        // Select DICOM row
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Select DICOM", whiteTextStyle, GUILayout.Width(88));
         EditorGUILayout.LabelField(Selection.activeGameObject.name, whiteTextStyle);
         EditorGUILayout.EndHorizontal();
 
-        // Add double-sided checkbox
+        // Options row
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
         isDoubleSided = EditorGUILayout.Toggle("Double-Sided", isDoubleSided);
         EditorGUILayout.EndHorizontal();
 
+        // Export STL row
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
         var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 

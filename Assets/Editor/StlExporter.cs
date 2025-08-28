@@ -29,7 +29,22 @@ public static class StlExporter
         var visibilityWindow = volumeObject.GetVisibilityWindow();
         var isoLevel = dataset.GetMinDataValue() + visibilityWindow.x * (dataset.GetMaxDataValue() - dataset.GetMinDataValue());
         
-        var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel, true, doubleSided);
+        var wasCancelled = false;
+        var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel, true, doubleSided,
+            reportProgressAndCheckCancel: (progress) =>
+            {
+                var cancelled = EditorUtility.DisplayCancelableProgressBar("Export STL", "Generating mesh…", Mathf.Clamp01(progress));
+                if (cancelled) wasCancelled = true;
+                return cancelled;
+            });
+        
+        EditorUtility.ClearProgressBar();
+        
+        if (wasCancelled)
+        {
+            return;
+        }
+        
         if (mesh.vertexCount == 0)
         {
             EditorUtility.DisplayDialog("Generation Failed", "The generated mesh is empty. Please adjust the isoLevel.", "OK");

@@ -6,7 +6,8 @@ public static class IsoSurfaceGenerator
 {
     public static Mesh BuildMesh(
         float[] voxels, int width, int height, int depth,
-        float isoLevel = 0.5f, bool smooth = true, bool doubleSided = false)
+        float isoLevel = 0.5f, bool smooth = true, bool doubleSided = false,
+        System.Func<float, bool> reportProgressAndCheckCancel = null)
     {
         var algo = new MarchingCubes(isoLevel);
         var vertices = new List<Vector3>(doubleSided ? 131072 : 65536);
@@ -15,37 +16,56 @@ public static class IsoSurfaceGenerator
         var slice = width * height;
 
         for (var z = 0; z < depth - 1; z++)
-        for (var y = 0; y < height - 1; y++)
-        for (var x = 0; x < width - 1; x++)
         {
-            var p = x + y * width + z * slice;
-            // Voxel values at the eight corners of the cube
-            cube[0] = voxels[p];
-            cube[1] = voxels[p + 1];
-            cube[2] = voxels[p + 1 + width];
-            cube[3] = voxels[p + width];
-            cube[4] = voxels[p + slice];
-            cube[5] = voxels[p + 1 + slice];
-            cube[6] = voxels[p + 1 + width + slice];
-            cube[7] = voxels[p + width + slice];
-
-            if (doubleSided)
+            // Report progress and check for cancellation at the start of each z slice
+            if (reportProgressAndCheckCancel != null)
             {
-                var tempVertices = new List<Vector3>();
-                var tempTriangles = new List<int>();
-                algo.PolygoniseCube(x, y, z, cube, tempVertices, tempTriangles);
-                for (var i = 0; i < tempTriangles.Count; i += 3)
+                var progress = (float)z / (depth - 1);
+                if (reportProgressAndCheckCancel(progress))
                 {
-                    var v1 = tempVertices[tempTriangles[i]];
-                    var v2 = tempVertices[tempTriangles[i + 1]];
-                    var v3 = tempVertices[tempTriangles[i + 2]];
-                    AddDoubleSidedTriangle(vertices, triangles, v1, v2, v3);
+                    // Operation was cancelled, return null or empty mesh
+                    return new Mesh();
                 }
             }
-            else
+
+            for (var y = 0; y < height - 1; y++)
+            for (var x = 0; x < width - 1; x++)
             {
-                algo.PolygoniseCube(x, y, z, cube, vertices, triangles);
+                var p = x + y * width + z * slice;
+                // Voxel values at the eight corners of the cube
+                cube[0] = voxels[p];
+                cube[1] = voxels[p + 1];
+                cube[2] = voxels[p + 1 + width];
+                cube[3] = voxels[p + width];
+                cube[4] = voxels[p + slice];
+                cube[5] = voxels[p + 1 + slice];
+                cube[6] = voxels[p + 1 + width + slice];
+                cube[7] = voxels[p + width + slice];
+
+                if (doubleSided)
+                {
+                    var tempVertices = new List<Vector3>();
+                    var tempTriangles = new List<int>();
+                    algo.PolygoniseCube(x, y, z, cube, tempVertices, tempTriangles);
+                    for (var i = 0; i < tempTriangles.Count; i += 3)
+                    {
+                        var v1 = tempVertices[tempTriangles[i]];
+                        var v2 = tempVertices[tempTriangles[i + 1]];
+                        var v3 = tempVertices[tempTriangles[i + 2]];
+                        AddDoubleSidedTriangle(vertices, triangles, v1, v2, v3);
+                    }
+                }
+                else
+                {
+                    algo.PolygoniseCube(x, y, z, cube, vertices, triangles);
+                }
             }
+        }
+
+        // Report 100% completion
+        if (reportProgressAndCheckCancel != null)
+        {
+            reportProgressAndCheckCancel(1.0f);
         }
 
         var mesh = new Mesh
