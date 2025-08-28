@@ -7,6 +7,7 @@ public class MeshPreviewEditor : EditorWindow
 {
     private PreviewRenderUtility previewRenderer;
     private bool isDoubleSided = true;
+    private float cameraDistance = 1.0f;
 
     /// <summary>
     /// Initializes the preview renderer.
@@ -88,6 +89,16 @@ public class MeshPreviewEditor : EditorWindow
             Initialize();
         }
         
+        // Handle mouse scroll wheel input for camera distance
+        var currentEvent = Event.current;
+        if (currentEvent.type == EventType.ScrollWheel)
+        {
+            var scrollDelta = currentEvent.delta.y / 3;
+            cameraDistance = Mathf.Clamp(cameraDistance + scrollDelta * 0.1f, 0.1f, 5.0f);
+            currentEvent.Use(); // Consume the event
+            Repaint(); // Force a repaint to update the view
+        }
+
         previewRenderer.camera.transform.RotateAround(Vector3.zero, Vector3.up, Time.deltaTime);
 
         var boundaries = new Rect(0, 0, position.width, position.height);
@@ -113,11 +124,9 @@ public class MeshPreviewEditor : EditorWindow
         var render = previewRenderer.EndPreview();
         GUI.DrawTexture(new Rect(0, 0, boundaries.width, boundaries.height), render);
 
-        previewRenderer.camera.transform.position = previewRenderer.camera.transform.position.normalized *
-                                                    EditorGUILayout.Slider(
-                                                        Mathf.Round(
-                                                            previewRenderer.camera.transform.position.magnitude * 10f) /
-                                                        10f, 0.1f, 5);
+        // Update camera position and sync with slider
+        cameraDistance = EditorGUILayout.Slider(Mathf.Round(cameraDistance * 10f) / 10f, 0.1f, 5);
+        previewRenderer.camera.transform.position = previewRenderer.camera.transform.position.normalized * cameraDistance;
 
         var whiteTextStyle = new GUIStyle(EditorStyles.label)
         {
