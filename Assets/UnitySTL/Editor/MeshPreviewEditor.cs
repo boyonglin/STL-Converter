@@ -9,9 +9,7 @@ public class MeshPreviewEditor : EditorWindow
     private bool isDoubleSided = true;
     private float cameraDistance = 1.0f;
     private bool useFinerMesh;
-    private int upsamplingIndex;
-    private readonly float[] upsamplingOptions = { 1.5f, 2.0f };
-    private readonly string[] upsamplingLabels = { "Finer (1.5x)", "Finest (2.0x)" };
+    private const float finerFactor = 1.5f;
 
     /// <summary>
     /// Initializes the preview renderer.
@@ -53,13 +51,13 @@ public class MeshPreviewEditor : EditorWindow
     }
 
     /// <summary>
-    /// Opens the Mesh Preview Editor window.
+    /// Opens the STL Mesh Converter window.
     /// </summary>
-    [MenuItem("Tools/Mesh Preview Editor")]
+    [MenuItem("Tools/STL Mesh Converter")]
     private static void InitializeWindow()
     {
-        var window = GetWindow<MeshPreviewEditor>("Mesh Preview Editor", true);
-        window.titleContent.tooltip = "Mesh Preview Editor";
+        var window = GetWindow<MeshPreviewEditor>("STL Mesh Converter", true);
+        window.titleContent.tooltip = "STL Mesh Converter";
         window.autoRepaintOnSceneChange = true;
         window.Show();
     }
@@ -88,10 +86,8 @@ public class MeshPreviewEditor : EditorWindow
             return;
         }
 
-        if (previewRenderer == null)
-        {
-            Initialize();
-        }
+        if (previewRenderer == null) Initialize();
+        if (previewRenderer == null) return;
         
         // Handle mouse scroll wheel input for camera distance
         var currentEvent = Event.current;
@@ -161,10 +157,6 @@ public class MeshPreviewEditor : EditorWindow
             {
                 GUI.FocusControl(null);
             }
-            if (useFinerMesh)
-            {
-                upsamplingIndex = EditorGUILayout.Popup(upsamplingIndex, upsamplingLabels);
-            }
             EditorGUILayout.EndVertical();
         }
         finally { EditorGUILayout.EndHorizontal(); }
@@ -176,7 +168,7 @@ public class MeshPreviewEditor : EditorWindow
             EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
             var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
                                ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
-            var upsamplingFactor = useFinerMesh ? upsamplingOptions[upsamplingIndex] : 1.0f;
+            var upsamplingFactor = useFinerMesh ? finerFactor : 1.0f;
             if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
             {
                 StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor);

@@ -6,6 +6,7 @@ using UnityVolumeRendering;
 
 public static class StlExporter
 {
+    // ReSharper disable Unity.PerformanceAnalysis
     /// <summary>
     /// Exports a VolumeRenderedObject to an STL file.
     /// </summary>
@@ -52,7 +53,7 @@ public static class StlExporter
         // Generate isosurface mesh
         var wasCancelled = false;
         var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel, true, doubleSided,
-            reportProgressAndCheckCancel: (progress) =>
+            onProgress: (progress) =>
             {
                 bool cancelled;
                 if (progress < 0f)
