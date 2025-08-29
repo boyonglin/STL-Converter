@@ -8,6 +8,10 @@ public class MeshPreviewEditor : EditorWindow
     private PreviewRenderUtility previewRenderer;
     private bool isDoubleSided = true;
     private float cameraDistance = 1.0f;
+    private bool useFinerMesh;
+    private int upsamplingIndex;
+    private readonly float[] upsamplingOptions = { 1.5f, 2.0f };
+    private readonly string[] upsamplingLabels = { "Finer (1.5x)", "Finest (2.0x)" };
 
     /// <summary>
     /// Initializes the preview renderer.
@@ -147,7 +151,21 @@ public class MeshPreviewEditor : EditorWindow
         try
         {
             EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
-            isDoubleSided = EditorGUILayout.Toggle("Double-Sided", isDoubleSided);
+            EditorGUILayout.BeginVertical();
+            // Make toggles not focusable but keep them enabled and colored
+            GUI.SetNextControlName("DoubleSidedToggle");
+            isDoubleSided = EditorGUILayout.Toggle("Double Sided", isDoubleSided);
+            GUI.SetNextControlName("FinerMeshToggle");
+            useFinerMesh = EditorGUILayout.Toggle("Finer Mesh", useFinerMesh);
+            if (GUI.GetNameOfFocusedControl() == "DoubleSidedToggle" || GUI.GetNameOfFocusedControl() == "FinerMeshToggle")
+            {
+                GUI.FocusControl(null);
+            }
+            if (useFinerMesh)
+            {
+                upsamplingIndex = EditorGUILayout.Popup(upsamplingIndex, upsamplingLabels);
+            }
+            EditorGUILayout.EndVertical();
         }
         finally { EditorGUILayout.EndHorizontal(); }
 
@@ -158,13 +176,14 @@ public class MeshPreviewEditor : EditorWindow
             EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
             var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
                                ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
+            var upsamplingFactor = useFinerMesh ? upsamplingOptions[upsamplingIndex] : 1.0f;
             if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
             {
-                StlExporter.Export(true, volumeObject, isDoubleSided);
+                StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor);
             }
             if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
             {
-                StlExporter.Export(false, volumeObject, isDoubleSided);
+                StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor);
             }
         }
         finally { EditorGUILayout.EndHorizontal(); }

@@ -12,7 +12,8 @@ public static class StlExporter
     /// <param name="isBinary">True to export in binary format, false for ASCII.</param>
     /// <param name="volumeObject">The VolumeRenderedObject to export.</param>
     /// <param name="doubleSided">True to create double-sided geometry.</param>
-    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false)
+    /// <param name="upsamplingFactor">The factor by which to upsample the mesh.</param>
+    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false, float upsamplingFactor = 1.0f)
     {
         if (!volumeObject)
         {
@@ -33,10 +34,23 @@ public static class StlExporter
         var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel, true, doubleSided,
             reportProgressAndCheckCancel: (progress) =>
             {
-                var cancelled = EditorUtility.DisplayCancelableProgressBar("Export STL", "Generating mesh…", Mathf.Clamp01(progress));
+                bool cancelled;
+                if (progress < 0f)
+                {
+                    // Upsampling stage (negative progress indicates upsampling)
+                    var p = Mathf.Clamp01(-progress);
+                    cancelled = EditorUtility.DisplayCancelableProgressBar("Export STL - Upsampling", "Upsampling voxels…", p);
+                }
+                else
+                {
+                    // Mesh generation stage
+                    var p = Mathf.Clamp01(progress);
+                    cancelled = EditorUtility.DisplayCancelableProgressBar("Export STL - Mesh", "Generating mesh…", p);
+                }
                 if (cancelled) wasCancelled = true;
                 return cancelled;
-            });
+            },
+            upsamplingFactor: upsamplingFactor);
         
         EditorUtility.ClearProgressBar();
         
@@ -196,10 +210,10 @@ public static class StlExporter
                 normal = Vector3.Cross(v1, v2).normalized;
             }
 
-            WriteVector3Fast(writer, normal);
-            WriteVector3Fast(writer, vertexData[a]);
-            WriteVector3Fast(writer, vertexData[b]);
-            WriteVector3Fast(writer, vertexData[c]);
+            WriteVector3(writer, normal);
+            WriteVector3(writer, vertexData[a]);
+            WriteVector3(writer, vertexData[b]);
+            WriteVector3(writer, vertexData[c]);
 
             writer.Write((ushort)0); // attribute byte count
         }
@@ -208,56 +222,13 @@ public static class StlExporter
     /// <summary>
     /// Optimized Vector3 writing using BitConverter for better performance
     /// </summary>
-    private static void WriteVector3Fast(BinaryWriter writer, Vector3 vector)
-    {
-        writer.Write(vector.x);
-        writer.Write(vector.y);
-        writer.Write(vector.z);
-    }
-
-    /// <summary>
-    /// Original binary STL writer (kept for reference)
-    /// </summary>
-    private static void WriteBinaryStl(Mesh mesh, string filePath)
-    {
-        var triangles = mesh.triangles;
-        var vertices = mesh.vertices;
-        var normals = mesh.normals;
-
-        using var writer = new BinaryWriter(File.Open(filePath, FileMode.Create));
-
-        // Write 80-byte header
-        var header = new byte[80];
-        Encoding.ASCII.GetBytes("unity_volumerendering").CopyTo(header, 0);
-        writer.Write(header);
-
-        // Write triangle count
-        writer.Write((uint)(triangles.Length / 3));
-
-        // Write triangles
-        for (var i = 0; i < triangles.Length; i += 3)
-        {
-            int a = triangles[i], b = triangles[i + 1], c = triangles[i + 2];
-            var normal = normals.Length == vertices.Length
-                ? normals[a]
-                : Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).normalized;
-
-            WriteVector3(writer, normal);
-            WriteVector3(writer, vertices[a]);
-            WriteVector3(writer, vertices[b]);
-            WriteVector3(writer, vertices[c]);
-
-            writer.Write((ushort)0); // attribute byte count
-        }
-    }
-
     private static void WriteVector3(BinaryWriter writer, Vector3 vector)
     {
         writer.Write(vector.x);
         writer.Write(vector.y);
         writer.Write(vector.z);
     }
-
+    
     /// <summary>
     /// Optimized ASCII STL writer with StringBuilder pre-sizing
     /// </summary>
