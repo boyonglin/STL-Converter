@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityVolumeRendering;
 
-public class MeshPreviewEditor : EditorWindow
+public class StlMeshConverter : EditorWindow
 {
     private PreviewRenderUtility previewRenderer;
     private bool isDoubleSided = true;
@@ -56,7 +56,7 @@ public class MeshPreviewEditor : EditorWindow
     [MenuItem("Tools/STL Mesh Converter")]
     private static void InitializeWindow()
     {
-        var window = GetWindow<MeshPreviewEditor>("STL Mesh Converter", true);
+        var window = GetWindow<StlMeshConverter>("STL Mesh Converter", true);
         window.titleContent.tooltip = "STL Mesh Converter";
         window.autoRepaintOnSceneChange = true;
         window.Show();
@@ -135,50 +135,42 @@ public class MeshPreviewEditor : EditorWindow
 
         // Select DICOM row
         EditorGUILayout.BeginHorizontal();
-        try
-        {
-            EditorGUILayout.LabelField("Select DICOM", whiteTextStyle, GUILayout.Width(88));
-            EditorGUILayout.LabelField(Selection.activeGameObject.name, whiteTextStyle);
-        }
-        finally { EditorGUILayout.EndHorizontal(); }
+        EditorGUILayout.LabelField("Select DICOM", whiteTextStyle, GUILayout.Width(88));
+        EditorGUILayout.LabelField(Selection.activeGameObject.name, whiteTextStyle);
+        EditorGUILayout.EndHorizontal();
 
         // Options row
         EditorGUILayout.BeginHorizontal();
-        try
+        EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
+        EditorGUILayout.BeginVertical();
+        
+        // Make toggles not focusable but keep them enabled and colored
+        GUI.SetNextControlName("DoubleSidedToggle");
+        isDoubleSided = EditorGUILayout.Toggle("Double Sided", isDoubleSided);
+        GUI.SetNextControlName("FinerMeshToggle");
+        useFinerMesh = EditorGUILayout.Toggle("Finer Mesh", useFinerMesh);
+        if (GUI.GetNameOfFocusedControl() == "DoubleSidedToggle" || GUI.GetNameOfFocusedControl() == "FinerMeshToggle")
         {
-            EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
-            EditorGUILayout.BeginVertical();
-            // Make toggles not focusable but keep them enabled and colored
-            GUI.SetNextControlName("DoubleSidedToggle");
-            isDoubleSided = EditorGUILayout.Toggle("Double Sided", isDoubleSided);
-            GUI.SetNextControlName("FinerMeshToggle");
-            useFinerMesh = EditorGUILayout.Toggle("Finer Mesh", useFinerMesh);
-            if (GUI.GetNameOfFocusedControl() == "DoubleSidedToggle" || GUI.GetNameOfFocusedControl() == "FinerMeshToggle")
-            {
-                GUI.FocusControl(null);
-            }
-            EditorGUILayout.EndVertical();
+            GUI.FocusControl(null);
         }
-        finally { EditorGUILayout.EndHorizontal(); }
+        EditorGUILayout.EndVertical();
+        EditorGUILayout.EndHorizontal();
 
         // Export STL row
         EditorGUILayout.BeginHorizontal();
-        try
+        EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
+        var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
+                           ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
+        var upsamplingFactor = useFinerMesh ? finerFactor : 1.0f;
+        if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
         {
-            EditorGUILayout.LabelField("Export STL", whiteTextStyle, GUILayout.Width(88));
-            var volumeObject = Selection.activeGameObject.GetComponent<VolumeRenderedObject>() 
-                               ?? Selection.activeGameObject.transform.parent?.GetComponent<VolumeRenderedObject>();
-            var upsamplingFactor = useFinerMesh ? finerFactor : 1.0f;
-            if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
-            {
-                StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor);
-            }
-            if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
-            {
-                StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor);
-            }
+            StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor);
         }
-        finally { EditorGUILayout.EndHorizontal(); }
+        if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
+        {
+            StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor);
+        }
+        EditorGUILayout.EndHorizontal();
     }
 
     private void DrawSelectedMesh(Mesh mesh, Material material, Transform transform)
