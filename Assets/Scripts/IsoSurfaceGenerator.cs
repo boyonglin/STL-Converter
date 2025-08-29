@@ -60,15 +60,15 @@ public static class IsoSurfaceGenerator
         }
 
         var slice = width * height;
-        int estVertsPerThread = Math.Max(1024, (width * height) / 8);
-        int estTrisPerThread = estVertsPerThread * 3;
+        var estVertsPerThread = Math.Max(1024, (width * height) / 8);
+        var estTrisPerThread = estVertsPerThread * 3;
         var buffersTL = new ThreadLocal<LocalBuffers>(
             () => new LocalBuffers(estVertsPerThread, estTrisPerThread),
             trackAllValues: true);
         var mcTL = new ThreadLocal<MarchingCubes>(() => new MarchingCubes(isoLevel));
 
-        int processedSlices = 0;
-        int cancelFlag = 0;
+        var processedSlices = 0;
+        var cancelFlag = 0;
         Exception backgroundException = null;
 
         var options = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
@@ -256,8 +256,8 @@ public static class IsoSurfaceGenerator
         float newWMinus1 = (newW - 1);
         float newHMinus1 = (newH - 1);
         float newDMinus1 = (newD - 1);
-        int oldSlice = w * h;
-        int newSlice = newW * newH;
+        var oldSlice = w * h;
+        var newSlice = newW * newH;
 
         // Create local copies to avoid capturing out-parameters inside lambda
         var srcLocal = src;
@@ -268,8 +268,8 @@ public static class IsoSurfaceGenerator
         float newWMinus1Local = newWMinus1, newHMinus1Local = newHMinus1, newDMinus1Local = newDMinus1;
         int oldSliceLocal = oldSlice, newSliceLocal = newSlice;
 
-        int processedSlices = 0;
-        int cancelFlag = 0;
+        var processedSlices = 0;
+        var cancelFlag = 0;
 
         var options = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
 
@@ -299,11 +299,11 @@ public static class IsoSurfaceGenerator
                     var localOldSlice = oldSliceLocal;
                     var localNewSlice = newSliceLocal;
 
-                    int z0OffsetOld = z0 * localOldSlice;
-                    int z1OffsetOld = z1 * localOldSlice;
-                    int zOffsetNew = z * localNewSlice;
+                    var z0OffsetOld = z0 * localOldSlice;
+                    var z1OffsetOld = z1 * localOldSlice;
+                    var zOffsetNew = z * localNewSlice;
 
-                    for (int y = 0; y < localNewH; y++)
+                    for (var y = 0; y < localNewH; y++)
                     {
                         var gy = (newHMinus1Local > 0f) ? (y / newHMinus1Local) * oldHMinus1Local : 0f;
                         var y0 = Mathf.FloorToInt(gy);
@@ -313,7 +313,7 @@ public static class IsoSurfaceGenerator
                         var y1W = y1 * localW;
                         var destYBase = zOffsetNew + y * localNewW;
 
-                        for (int x = 0; x < localNewW; x++)
+                        for (var x = 0; x < localNewW; x++)
                         {
                             var gx = (newWMinus1Local > 0f) ? (x / newWMinus1Local) * oldWMinus1Local : 0f;
                             var x0 = Mathf.FloorToInt(gx);

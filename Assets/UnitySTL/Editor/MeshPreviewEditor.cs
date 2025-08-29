@@ -43,7 +43,7 @@ public class StlMeshConverter : EditorWindow
         }
     }
 
-    private Light[] FindDirectionalLights()
+    private static Light[] FindDirectionalLights()
     {
         return FindObjectsByType<Light>(FindObjectsSortMode.None)
             .Where(light => light.type == LightType.Directional)

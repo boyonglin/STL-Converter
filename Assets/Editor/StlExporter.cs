@@ -30,7 +30,7 @@ public static class StlExporter
         // Basic validation to catch common issues that lead to empty meshes
         if (voxels == null || voxels.Length != width * height * depth)
         {
-            Debug.LogError($"Voxel data invalid: expected {width * height * depth} samples but got {(voxels == null ? 0 : voxels.Length)}.");
+            Debug.LogError($"Voxel data invalid: expected {width * height * depth} samples but got {voxels?.Length ?? 0}.");
             EditorUtility.DisplayDialog("Data Error", "Voxel data is missing or has incorrect dimensions. Cannot generate mesh.", "OK");
             return;
         }
@@ -117,7 +117,7 @@ public static class StlExporter
         var triangles = mesh.triangles;
         var vertices = mesh.vertices;
         var normals = mesh.normals;
-        int triangleCount = triangles.Length / 3;
+        var triangleCount = triangles.Length / 3;
 
         using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 65536);
         using var writer = new BinaryWriter(stream);
@@ -146,9 +146,9 @@ public static class StlExporter
                 // Process triangles in batches to reduce method call overhead
                 for (var i = 0; i < triangles.Length; i += 3)
                 {
-                    int a = triangles[i];
-                    int b = triangles[i + 1]; 
-                    int c = triangles[i + 2];
+                    var a = triangles[i];
+                    var b = triangles[i + 1]; 
+                    var c = triangles[i + 2];
 
                     // Calculate or use existing normal
                     Vector3 normal;
@@ -215,9 +215,9 @@ public static class StlExporter
         // Write triangles
         for (var i = 0; i < triangles.Length; i += 3)
         {
-            int a = triangles[i];
-            int b = triangles[i + 1];
-            int c = triangles[i + 2];
+            var a = triangles[i];
+            var b = triangles[i + 1];
+            var c = triangles[i + 2];
 
             // Calculate or use existing normal
             Vector3 normal;
@@ -259,7 +259,7 @@ public static class StlExporter
         var triangles = mesh.triangles;
         var vertices = mesh.vertices;
         var normals = mesh.normals;
-        int triangleCount = triangles.Length / 3;
+        var triangleCount = triangles.Length / 3;
 
         // Pre-size StringBuilder to reduce memory allocations
         // Estimate: ~200 characters per triangle on average
