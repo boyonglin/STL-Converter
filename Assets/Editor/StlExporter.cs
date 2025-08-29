@@ -26,10 +26,30 @@ public static class StlExporter
         var voxels = dataset.data;
         int width = dataset.dimX, height = dataset.dimY, depth = dataset.dimZ;
 
-        // Generate isosurface mesh
+        // Basic validation to catch common issues that lead to empty meshes
+        if (voxels == null || voxels.Length != width * height * depth)
+        {
+            Debug.LogError($"Voxel data invalid: expected {width * height * depth} samples but got {(voxels == null ? 0 : voxels.Length)}.");
+            EditorUtility.DisplayDialog("Data Error", "Voxel data is missing or has incorrect dimensions. Cannot generate mesh.", "OK");
+            return;
+        }
+
+        var dataMin = dataset.GetMinDataValue();
+        var dataMax = dataset.GetMaxDataValue();
         var visibilityWindow = volumeObject.GetVisibilityWindow();
-        var isoLevel = dataset.GetMinDataValue() + visibilityWindow.x * (dataset.GetMaxDataValue() - dataset.GetMinDataValue());
-        
+        var isoLevel = dataMin + visibilityWindow.x * (dataMax - dataMin);
+        if (dataMax <= dataMin)
+        {
+            Debug.LogError($"Dataset min/max invalid: min={dataMin}, max={dataMax}");
+            EditorUtility.DisplayDialog("Data Error", "Dataset value range is invalid. Cannot generate mesh.", "OK");
+            return;
+        }
+        if (isoLevel < dataMin || isoLevel > dataMax)
+        {
+            Debug.LogWarning($"Computed isoLevel {isoLevel} is outside data range [{dataMin},{dataMax}]. This may produce an empty mesh.");
+        }
+
+        // Generate isosurface mesh
         var wasCancelled = false;
         var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel, true, doubleSided,
             reportProgressAndCheckCancel: (progress) =>
@@ -59,9 +79,10 @@ public static class StlExporter
             return;
         }
         
-        if (mesh.vertexCount == 0)
+        // Robust empty-mesh check: handle null, zero vertices, or no triangles
+        if (mesh == null || mesh.vertexCount == 0 || mesh.triangles == null || mesh.triangles.Length == 0)
         {
-            EditorUtility.DisplayDialog("Generation Failed", "The generated mesh is empty. Please adjust the isoLevel.", "OK");
+            EditorUtility.DisplayDialog("Generation Failed", "The generated mesh is empty or invalid. Please adjust the isoLevel and try again.", "OK");
             return;
         }
 
