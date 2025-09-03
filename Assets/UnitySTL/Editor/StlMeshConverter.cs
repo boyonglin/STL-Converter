@@ -10,6 +10,7 @@ public class StlMeshConverter : EditorWindow
     private float cameraDistance = 1.0f;
     private bool useFinerMesh;
     private const float finerFactor = 1.5f;
+    private Transform clipBox;
 
     /// <summary>
     /// Initializes the preview renderer.
@@ -144,6 +145,12 @@ public class StlMeshConverter : EditorWindow
         EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
         EditorGUILayout.BeginVertical();
         
+        // Clip Box field
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Clip Box", whiteTextStyle, GUILayout.Width(149));
+        clipBox = (Transform)EditorGUILayout.ObjectField(clipBox, typeof(Transform), true);
+        EditorGUILayout.EndHorizontal();
+        
         // Make toggles not focusable but keep them enabled and colored
         GUI.SetNextControlName("DoubleSidedToggle");
         isDoubleSided = EditorGUILayout.Toggle("Double Sided", isDoubleSided);
@@ -164,11 +171,11 @@ public class StlMeshConverter : EditorWindow
         var upsamplingFactor = useFinerMesh ? finerFactor : 1.0f;
         if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor);
+            StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor, clipBox);
         }
         if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor);
+            StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor, clipBox);
         }
         EditorGUILayout.EndHorizontal();
     }

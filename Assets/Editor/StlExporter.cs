@@ -14,7 +14,8 @@ public static class StlExporter
     /// <param name="volumeObject">The VolumeRenderedObject to export.</param>
     /// <param name="doubleSided">True to create double-sided geometry.</param>
     /// <param name="upsamplingFactor">The factor by which to upsample the mesh.</param>
-    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false, float upsamplingFactor = 1.0f)
+    /// <param name="clipBox">The cross-section box added from Easy Volume Renderer.</param>
+    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false, float upsamplingFactor = 1.0f, Transform clipBox = null)
     {
         if (!volumeObject)
         {
@@ -89,9 +90,28 @@ public static class StlExporter
 
         // Apply scale and pivot correction
         var transformScale = volumeObject.transform.lossyScale;
-        var transformRotation = volumeObject.transform.rotation * Quaternion.Euler(-90f, 0, 0);
+        var correctionRotation = Quaternion.Euler(-90f, 0, 0);
+        var transformRotation = volumeObject.transform.rotation * correctionRotation;
         MeshUtil.ApplyDatasetScaleAndCenter(mesh, dataset, transformScale, transformRotation);
 
+        if (clipBox != null)
+        {
+            // Apply same correction to clipBox so clipping occurs in the transformed mesh space
+            var originalClipBoxScale = clipBox.localScale;
+            clipBox.localScale = Vector3.Scale(clipBox.localScale, transformScale);
+
+            var meshOwner = volumeObject.transform;
+            var clipped = MeshClipper.ClipByBox(mesh, meshOwner, clipBox);
+
+            // Restore original clipBox transform
+            clipBox.localScale = originalClipBoxScale;
+
+            if (clipped != null && clipped.vertexCount > 0 && clipped.triangles.Length > 0)
+                mesh = clipped;
+            else
+                Debug.LogWarning("ClipBox produced empty mesh; fallback to original mesh.");
+        }
+        
         // Prompt user for the file path
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
         var suffix = doubleSided ? "_double" : "";
