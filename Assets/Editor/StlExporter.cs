@@ -96,17 +96,8 @@ public static class StlExporter
 
         if (clipBox != null)
         {
-            // Apply same correction to clipBox so clipping occurs in the transformed mesh space
-            var originalClipBoxScale = clipBox.localScale;
-            clipBox.localScale = Vector3.Scale(clipBox.localScale, transformScale);
-
-            var meshOwner = volumeObject.transform;
-            var clipped = MeshClipper.ClipByBox(mesh, meshOwner, clipBox);
-
-            // Restore original clipBox transform
-            clipBox.localScale = originalClipBoxScale;
-
-            if (clipped != null && clipped.vertexCount > 0 && clipped.triangles.Length > 0)
+            var clipped = MeshClipper.ClipByBoxWorld(mesh, clipBox);
+            if (clipped != null && clipped.vertexCount > 0 && clipped.triangles != null && clipped.triangles.Length > 0)
                 mesh = clipped;
             else
                 Debug.LogWarning("ClipBox produced empty mesh; fallback to original mesh.");

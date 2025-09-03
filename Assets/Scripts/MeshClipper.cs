@@ -5,38 +5,37 @@ using UnityEngine;
 public static class MeshClipper
 {
     /// <summary>
-    /// Clips a mesh by an axis-aligned unit box (local extents [-0.5, 0.5]) defined by <paramref name="boxTransform"/>.
-    /// The source mesh is expressed in <paramref name="meshTransform"/>'s local space; we build a polygon per source triangle,
-    /// successively clip it against the 6 half-spaces, then fan-triangulate the surviving polygon.
+    /// Clips a world-space mesh against a unit cube centered on <paramref name="box"/> 
+    /// (box-local extents [-0.5, 0.5] per axis after TRS). 
+    /// Triangles are polygon-clipped against 6 half-spaces, then fan-triangulated.
     /// </summary>
-    /// <param name="srcMesh">Source mesh (only vertices + triangles are used).</param>
-    /// <param name="meshTransform">Transform that owns the mesh (local space reference).</param>
-    /// <param name="boxTransform">Transform of the unit clip box (scale/rotation/position affect clipping frame).</param>
-    /// <param name="eps">Tolerance for classifying a vertex as inside (default 1e-6).</param>
-    /// <returns>A new clipped mesh (empty mesh if fully outside). Returns original if null/empty.</returns>
-    public static Mesh ClipByBox(Mesh srcMesh, Transform meshTransform, Transform boxTransform, float eps = 1e-6f)
+    /// <param name="worldMesh">Input mesh in world space (vertices + triangles used).</param>
+    /// <param name="box">Transform defining the clipping cube (its local unit cube after TRS).</param>
+    /// <param name="eps">Inside tolerance (default 1e-4).</param>
+    /// <returns>New mesh of clipped geometry; empty mesh if fully outside.</returns>
+    public static Mesh ClipByBoxWorld(Mesh worldMesh, Transform box, float eps = 1e-4f)
     {
-        if (srcMesh == null || srcMesh.vertexCount == 0) return srcMesh;
+        if (worldMesh == null || worldMesh.vertexCount == 0) return worldMesh;
 
-        // meshLocal → boxLocal
-        var toBox = boxTransform.worldToLocalMatrix * meshTransform.localToWorldMatrix;
-        // boxLocal → meshLocal
-        var toMesh = meshTransform.worldToLocalMatrix * boxTransform.localToWorldMatrix;
+        // world → box-local / box-local → world
+        var toBox = box.worldToLocalMatrix;
+        var toWorld = box.localToWorldMatrix;
 
-        var srcVertices = srcMesh.vertices;
-        var srcTriangles = srcMesh.triangles;
-        if (srcVertices == null || srcVertices.Length == 0 || srcTriangles == null || srcTriangles.Length == 0)
+        var srcVertices  = worldMesh.vertices;
+        var srcTriangles = worldMesh.triangles;
+        if (srcVertices == null || srcVertices.Length == 0 ||
+            srcTriangles == null || srcTriangles.Length == 0)
             return new Mesh();
 
-        // Working polygon buffers.
+        // Working polygon buffers
         var polygon = new List<Vector3>(8);
         var scratch = new List<Vector3>(8);
 
-        // Output buffers.
+        // Output buffers
         var outVertices = new List<Vector3>(srcVertices.Length);
-        var outIndices = new List<int>(srcTriangles.Length);
+        var outIndices  = new List<int>(srcTriangles.Length);
 
-        // Sequentially process each source triangle.
+        // Process each triangle
         for (var tri = 0; tri < srcTriangles.Length; tri += 3)
         {
             polygon.Clear();
@@ -44,20 +43,19 @@ public static class MeshClipper
             polygon.Add(toBox.MultiplyPoint3x4(srcVertices[srcTriangles[tri + 1]]));
             polygon.Add(toBox.MultiplyPoint3x4(srcVertices[srcTriangles[tri + 2]]));
 
-            // Clip against 6 planes: ±X, ±Y, ±Z (v * axisSign - half <= 0)
+            // Clip against ±X, ±Y, ±Z
             for (var axis = 0; axis < 3 && polygon.Count > 0; axis++)
             {
                 ClipAxis(polygon, scratch, axis, +1, 0.5f, eps);
                 if (polygon.Count == 0) break;
                 ClipAxis(polygon, scratch, axis, -1, 0.5f, eps);
             }
-            if (polygon.Count < 3) continue; // Fully clipped or degenerate
+            if (polygon.Count < 3) continue;
 
-            // Fan triangulate
+            // Fan triangulate, back to world space
             var baseIndex = outVertices.Count;
-            outVertices.AddRange(polygon.Select(t => toMesh.MultiplyPoint3x4(t)));
-
-            for (var k = 2; k < polygon.Count; k++)
+            outVertices.AddRange(polygon.Select(p => toWorld.MultiplyPoint3x4(p)));
+            for (var k = 2; k < polygon.Count; ++k)
             {
                 outIndices.Add(baseIndex);
                 outIndices.Add(baseIndex + k - 1);
