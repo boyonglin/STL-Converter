@@ -1,7 +1,7 @@
 {
   "dependencies": {
-    "co.parabox.stl": "https://github.com/karl-/pb_Stl.git",
-    "com.coplaydev.unity-mcp": "https://github.com/CoplayDev/unity-mcp.git?path=/UnityMcpBridge",
+    "co.parabox.stl": "https://github.com/karl-/pb_Stl.git#b6b2a6815f81ea2c61ae9f22d8e0635d363b5212",
+    "com.coplaydev.unity-mcp": "https://github.com/CoplayDev/unity-mcp.git?path=/UnityMcpBridge#22e8016aeef46bf8d11897588c49c2f5a8e04f7f",
     "com.unity.ai.navigation": "2.0.8",
     "com.unity.collab-proxy": "2.8.2",
     "com.unity.ide.rider": "3.0.36",

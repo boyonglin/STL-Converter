@@ -1,14 +1,14 @@
 {
   "dependencies": {
     "co.parabox.stl": {
-      "version": "https://github.com/karl-/pb_Stl.git",
+      "version": "https://github.com/karl-/pb_Stl.git#b6b2a6815f81ea2c61ae9f22d8e0635d363b5212",
       "depth": 0,
       "source": "git",
       "dependencies": {},
       "hash": "b6b2a6815f81ea2c61ae9f22d8e0635d363b5212"
     },
     "com.coplaydev.unity-mcp": {
-      "version": "https://github.com/CoplayDev/unity-mcp.git?path=/UnityMcpBridge",
+      "version": "https://github.com/CoplayDev/unity-mcp.git?path=/UnityMcpBridge#22e8016aeef46bf8d11897588c49c2f5a8e04f7f",
       "depth": 0,
       "source": "git",
       "dependencies": {
