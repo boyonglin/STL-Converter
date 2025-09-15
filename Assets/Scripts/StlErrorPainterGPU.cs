@@ -12,14 +12,14 @@ using UnityEditor;
 using UnityVolumeRendering;
 
 [ExecuteAlways]
-public class StlVertexErrorPainterGPU : MonoBehaviour
+public class StlErrorPainterGPU : MonoBehaviour
 {
     [Header("Scene Roots")]
     public Transform dicomRoot;
     public Transform stlRoot;
 
     [Header("Units")]
-    public float mmPerUnityUnit = 1000f;
+    public float mmPerUnityUnit = 1f;
 
     [Header("Probe settings")]
     public float surfaceEpsMm = 0.1f;
@@ -102,7 +102,7 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
     ComputeBuffer obliqueAngleBuffer;
     ComputeBuffer bandEdgeBuffer;
     ComputeBuffer bandColorBuffer;
-    ComputeBuffer bestDirBuffer; // GPU-reported best ray direction per vertex
+    // Removed: bestDirBuffer previously used for CPU validation of best ray directions
 
     // Volume data
     VolumeRenderedObject primaryVolume;
@@ -262,7 +262,7 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         int totalVertices = worldVertices.Length;
         var allColors = new Color[totalVertices];
         var allErrors = new float[totalVertices];
-        var allBestDirs = new Vector3[totalVertices];
+        // Removed: per-vertex best ray direction aggregation (debug-only)
 
         int batchCount = Mathf.CeilToInt((float)totalVertices / maxVerticesPerBatch);
         Debug.Log($"[GPU Painter] Large mesh detected. Processing {totalVertices} vertices in {batchCount} batches of max {maxVerticesPerBatch} vertices each.");
@@ -276,17 +276,17 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
             Debug.Log($"[GPU Painter] Processing batch {batch + 1}/{batchCount}: vertices {startIdx}-{endIdx - 1} ({batchSize} vertices)");
 
             // Process this batch and store results directly
-            yield return StartCoroutine(ProcessMeshGPUSingleBatch(worldVertices, worldNormals, startIdx, batchSize, allColors, allErrors, allBestDirs));
+            yield return StartCoroutine(ProcessMeshGPUSingleBatch(worldVertices, worldNormals, startIdx, batchSize, allColors, allErrors));
 
             // Allow frame to breathe between batches
             yield return new WaitForEndOfFrame();
         }
 
         // Apply final results to mesh
-        ApplyResultsToMesh(meshFilter, allColors, allErrors, allBestDirs);
+        ApplyResultsToMesh(meshFilter, allColors, allErrors);
     }
 
-    IEnumerator ProcessMeshGPUSingleBatch(Vector3[] worldVertices, Vector3[] worldNormals, int startIdx, int batchSize, Color[] allColors, float[] allErrors, Vector3[] allBestDirs)
+    IEnumerator ProcessMeshGPUSingleBatch(Vector3[] worldVertices, Vector3[] worldNormals, int startIdx, int batchSize, Color[] allColors, float[] allErrors)
     {
         // Create batch arrays
         var batchVertices = new Vector3[batchSize];
@@ -315,8 +315,16 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         var colors4 = bandColors.Select(c => new Vector4(c.r, c.g, c.b, c.a)).ToArray();
         bandColorBuffer.SetData(colors4);
 
+        // Validate bands to avoid GPU OOB reads
+        int desiredBandCount = bandColors != null ? bandColors.Length : 0;
+        int effectiveBandCount = Mathf.Min(desiredBandCount, edges != null ? (edges.Length + 1) : 0);
+        if (!autoBandsFromRange && bandEdgesMm != null && desiredBandCount > 0 && (bandEdgesMm.Length < desiredBandCount - 1))
+        {
+            Debug.LogWarning($"[GPU Painter] bandEdgesMm has {bandEdgesMm.Length} edges but needs at least {desiredBandCount - 1}. Using effective bandCount={effectiveBandCount}.");
+        }
+
         // Set compute shader parameters
-        SetComputeParameters(batchSize, edges.Length);
+        SetComputeParameters(batchSize, effectiveBandCount);
 
         // Dispatch compute shader with safety check
         int kernel = errorPainterCompute.FindKernel("CSMain");
@@ -339,11 +347,9 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         var colors = new Color[batchSize];
         var colorData = new Vector4[batchSize];
         var errors = new float[batchSize];
-        var bestDirs = new Vector3[batchSize];
         
         vertexColorBuffer.GetData(colorData);
         errorResultBuffer.GetData(errors);
-        bestDirBuffer.GetData(bestDirs);
         
         for (int i = 0; i < batchSize; i++)
         {
@@ -353,7 +359,6 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         // Copy results back to main arrays
         Array.Copy(colors, 0, allColors, startIdx, batchSize);
         Array.Copy(errors, 0, allErrors, startIdx, batchSize);
-        Array.Copy(bestDirs, 0, allBestDirs, startIdx, batchSize);
 
         // Cleanup buffers for this batch
         ReleaseBuffers();
@@ -384,8 +389,16 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         var colors4 = bandColors.Select(c => new Vector4(c.r, c.g, c.b, c.a)).ToArray();
         bandColorBuffer.SetData(colors4);
 
+        // Validate bands to avoid GPU OOB reads
+        int desiredBandCount = bandColors != null ? bandColors.Length : 0;
+        int effectiveBandCount = Mathf.Min(desiredBandCount, edges != null ? (edges.Length + 1) : 0);
+        if (!autoBandsFromRange && bandEdgesMm != null && desiredBandCount > 0 && (bandEdgesMm.Length < desiredBandCount - 1))
+        {
+            Debug.LogWarning($"[GPU Painter] bandEdgesMm has {bandEdgesMm.Length} edges but needs at least {desiredBandCount - 1}. Using effective bandCount={effectiveBandCount}.");
+        }
+
         // Set compute shader parameters
-        SetComputeParameters(count, edges.Length);
+        SetComputeParameters(count, effectiveBandCount);
 
         // Dispatch compute shader
         int kernel = errorPainterCompute.FindKernel("CSMain");
@@ -408,10 +421,8 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         var colors = new Color[count];
         var colorData = new Vector4[count];
         var errors = new float[count];
-        var bestDirs = new Vector3[count];
         vertexColorBuffer.GetData(colorData);
         errorResultBuffer.GetData(errors);
-        bestDirBuffer.GetData(bestDirs);
         
         for (int i = 0; i < count; i++)
         {
@@ -419,13 +430,13 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         }
 
         // Apply results to mesh
-        ApplyResultsToMesh(meshFilter, colors, errors, bestDirs);
+        ApplyResultsToMesh(meshFilter, colors, errors);
 
         // Cleanup buffers
         ReleaseBuffers();
     }
 
-    void ApplyResultsToMesh(MeshFilter meshFilter, Color[] colors, float[] errors, Vector3[] bestDirs)
+    void ApplyResultsToMesh(MeshFilter meshFilter, Color[] colors, float[] errors)
     {
         // Apply colors to mesh (use instance to avoid changing shared mesh across duplicates)
         var renderer = meshFilter.GetComponent<MeshRenderer>();
@@ -490,16 +501,7 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         }
     }
 
-    Vector3[] GetWorldVerticesFromMesh(MeshFilter meshFilter)
-    {
-        var vertices = meshFilter.sharedMesh.vertices;
-        var worldVertices = new Vector3[vertices.Length];
-        for (int i = 0; i < vertices.Length; i++)
-        {
-            worldVertices[i] = meshFilter.transform.TransformPoint(vertices[i]);
-        }
-        return worldVertices;
-    }
+    // Removed legacy helper previously used during CPU validation
 
     void CreateBuffers(int vertexCount)
     {
@@ -518,10 +520,9 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         var edgeCount = autoBandsFromRange ? bandColors.Length - 1 : bandEdgesMm.Length;
         bandEdgeBuffer = new ComputeBuffer(edgeCount, sizeof(float));
         bandColorBuffer = new ComputeBuffer(bandColors.Length, sizeof(float) * 4);
-    bestDirBuffer = new ComputeBuffer(vertexCount, sizeof(float) * 3);
     }
 
-    void SetComputeParameters(int vertexCount, int edgeCount)
+    void SetComputeParameters(int vertexCount, int bandCountParam)
     {
         int kernel = errorPainterCompute.FindKernel("CSMain");
 
@@ -536,7 +537,6 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         errorPainterCompute.SetBuffer(kernel, "obliqueAngles", obliqueAngleBuffer);
         errorPainterCompute.SetBuffer(kernel, "bandEdges", bandEdgeBuffer);
         errorPainterCompute.SetBuffer(kernel, "bandColors", bandColorBuffer);
-        errorPainterCompute.SetBuffer(kernel, "bestRayDirs", bestDirBuffer);
 
         // Set volume texture
         errorPainterCompute.SetTexture(kernel, "volumeTexture", volumeTexture);
@@ -563,6 +563,8 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         errorPainterCompute.SetFloat("maxProbeMm", maxProbeMm);
         errorPainterCompute.SetInt("tryBothDirections", tryBothDirections ? 1 : 0);
         errorPainterCompute.SetFloat("densityThreshold", densityThreshold);
+        // Explicitly use interpolated sampling, not nearest-voxel parity
+        errorPainterCompute.SetInt("useNearestVoxel", 0);
 
         // Sampling parameters
         errorPainterCompute.SetInt("rayAngleCount", rayAngleOffsets.Length);
@@ -584,8 +586,7 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         errorPainterCompute.SetInt("radialDirectionCount", radialDirectionCount);
 
         // Color mapping
-        errorPainterCompute.SetInt("bandCount", bandColors.Length);
-        errorPainterCompute.SetInt("edgeCount", edgeCount);
+        errorPainterCompute.SetInt("bandCount", bandCountParam);
         errorPainterCompute.SetFloat("colorMinMm", colorMinMm);
         errorPainterCompute.SetFloat("colorMaxMm", colorMaxMm);
         errorPainterCompute.SetInt("reverseColorScale", reverseColorScale ? 1 : 0);
@@ -656,7 +657,6 @@ public class StlVertexErrorPainterGPU : MonoBehaviour
         obliqueAngleBuffer?.Release();
         bandEdgeBuffer?.Release();
         bandColorBuffer?.Release();
-    bestDirBuffer?.Release();
     }
 
     void OnDestroy()

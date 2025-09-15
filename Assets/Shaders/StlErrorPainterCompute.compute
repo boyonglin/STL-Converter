@@ -11,7 +11,6 @@ StructuredBuffer<float3> vertexPositions;   // read-only
 StructuredBuffer<float3> vertexNormals;     // read-only
 RWStructuredBuffer<float4> vertexColors;
 RWStructuredBuffer<float> errorResults;
-RWStructuredBuffer<float3> bestRayDirs; // for verification (CPU parity)
 
 // Volume data
 Texture3D<float> volumeTexture;
@@ -59,7 +58,6 @@ int radialDirectionCount;
 StructuredBuffer<float> bandEdges;
 StructuredBuffer<float4> bandColors;
 int bandCount;
-int edgeCount; // number of edges in bandEdges buffer (usually bandCount-1)
 float colorMinMm;
 float colorMaxMm;
 int reverseColorScale;
@@ -420,7 +418,8 @@ float4 MapBandColor(float valMm)
     
     // Find appropriate band
     int idx = 0;
-    int ec = max(1, edgeCount);
+    // edges count = bandCount - 1 (C# ensures effective bandCount matches edges+1)
+    int ec = max(1, bandCount - 1);
     for (int i = 0; i < ec; i++)
     {
         if (v <= bandEdges[i])
@@ -637,5 +636,5 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     // Store results
     errorResults[vertexIndex] = foundHit ? bestErrorMm : -1.0;
     vertexColors[vertexIndex] = bestColor;
-    bestRayDirs[vertexIndex] = bestRay;
+    // Removed: per-vertex best ray direction output (debug-only)
 }
