@@ -3,7 +3,7 @@
 // Forward declarations
 float3 GetOffsetRayDirection(float3 normal, float angleDegrees, int rayIndex);
 float3 GetRadialDirection(float3 normal, float radAngle);
-bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm);
+bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm, out float3 dispMm);
 float4 MapBandColor(float valMm);
 
 // Buffers
@@ -11,6 +11,7 @@ StructuredBuffer<float3> vertexPositions;   // read-only
 StructuredBuffer<float3> vertexNormals;     // read-only
 RWStructuredBuffer<float4> vertexColors;
 RWStructuredBuffer<float> errorResults;
+RWStructuredBuffer<float3> errorVectors; // displacement vector from vertex to volume hit (mm)
 
 // Volume data
 Texture3D<float> volumeTexture;
@@ -128,9 +129,10 @@ bool IsVisible(float density)
     }
 }
 
-bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm)
+bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm, out float3 dispMm)
 {
     errorMm = 1e10;
+    dispMm = float3(0,0,0);
     
     // Ray starting point (offset from surface)
     float3 rayStart = worldPos + rayDir * eps;
@@ -404,7 +406,9 @@ bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out f
     
     if (foundVolume)
     {
-        errorMm = length(volumeHitPoint - worldPos) * mmPerUnityUnit;
+        float3 diff = (volumeHitPoint - worldPos);
+        errorMm = length(diff) * mmPerUnityUnit;
+        dispMm = diff * mmPerUnityUnit;
         return true;
     }
     
@@ -454,6 +458,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     float4 bestColor = float4(0.5, 0.5, 0.5, 1);
     bool foundHit = false;
     float3 bestRay = -normal; // default
+    float3 bestVecMm = float3(0,0,0);
     
     // Store all ray results for intelligent weighting
     float rayErrors[32]; // Max 32 rays
@@ -501,7 +506,8 @@ void CSMain (uint3 id : SV_DispatchThreadID)
         
         // Probe in this direction
         float errorMm;
-        if (ProbeDirection(vertexPos, rayDir, eps, maxU, errorMm))
+        float3 dispMm;
+        if (ProbeDirection(vertexPos, rayDir, eps, maxU, errorMm, dispMm))
         {
             if (validRayCount < 32)
             {
@@ -530,6 +536,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
             {
                 bestErrorMm = errorMm;
                 bestRay = rayDir;
+                bestVecMm = dispMm;
             }
         }
     }
@@ -547,12 +554,13 @@ void CSMain (uint3 id : SV_DispatchThreadID)
             float3 radialDir = GetRadialDirection(normal, radAngle);
             
             float errorMm;
-            if (ProbeDirection(vertexPos, radialDir, eps, maxU, errorMm))
+            float3 dispMm;
+            if (ProbeDirection(vertexPos, radialDir, eps, maxU, errorMm, dispMm))
             {
                 rayErrors[validRayCount] = errorMm;
                 rayWeights[validRayCount] = 0.5; // Lower weight for aggressive samples
                 validRayCount++;
-                if (useShortestDistance && errorMm < bestErrorMm) { bestErrorMm = errorMm; bestRay = radialDir; }
+                if (useShortestDistance && errorMm < bestErrorMm) { bestErrorMm = errorMm; bestRay = radialDir; bestVecMm = dispMm; }
             }
         }
     }
@@ -635,6 +643,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     
     // Store results
     errorResults[vertexIndex] = foundHit ? bestErrorMm : -1.0;
+    errorVectors[vertexIndex] = foundHit ? bestVecMm : float3(0,0,0);
     vertexColors[vertexIndex] = bestColor;
     // Removed: per-vertex best ray direction output (debug-only)
 }

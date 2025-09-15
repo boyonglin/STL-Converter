@@ -96,6 +96,7 @@ public class StlErrorPainterGPU : MonoBehaviour
     ComputeBuffer vertexNormalBuffer;
     ComputeBuffer vertexColorBuffer;
     ComputeBuffer errorResultBuffer;
+    ComputeBuffer errorVectorBuffer;
     ComputeBuffer rayAngleBuffer;
     ComputeBuffer verticalAngleBuffer;
     ComputeBuffer horizontalAngleBuffer;
@@ -234,7 +235,6 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
 
         int vertexCount = vertices.Length;
-        Debug.Log($"[GPU Painter] Processing {meshFilter.name}: {vertexCount} vertices");
 
         // Transform vertices to world space
         var worldVertices = new Vector3[vertexCount];
@@ -511,6 +511,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         vertexNormalBuffer = new ComputeBuffer(vertexCount, sizeof(float) * 3);
         vertexColorBuffer = new ComputeBuffer(vertexCount, sizeof(float) * 4);
         errorResultBuffer = new ComputeBuffer(vertexCount, sizeof(float));
+        errorVectorBuffer = new ComputeBuffer(vertexCount, sizeof(float) * 3);
         
         rayAngleBuffer = new ComputeBuffer(rayAngleOffsets.Length, sizeof(float));
         verticalAngleBuffer = new ComputeBuffer(verticalAngles.Length, sizeof(float));
@@ -531,6 +532,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         errorPainterCompute.SetBuffer(kernel, "vertexNormals", vertexNormalBuffer);
         errorPainterCompute.SetBuffer(kernel, "vertexColors", vertexColorBuffer);
         errorPainterCompute.SetBuffer(kernel, "errorResults", errorResultBuffer);
+        errorPainterCompute.SetBuffer(kernel, "errorVectors", errorVectorBuffer);
         errorPainterCompute.SetBuffer(kernel, "rayAngleOffsets", rayAngleBuffer);
         errorPainterCompute.SetBuffer(kernel, "verticalAngles", verticalAngleBuffer);
         errorPainterCompute.SetBuffer(kernel, "horizontalAngles", horizontalAngleBuffer);
@@ -622,7 +624,7 @@ public class StlErrorPainterGPU : MonoBehaviour
 
     void CalculateStatistics(MeshFilter[] meshFilters)
     {
-    int n = _allErrors.Count;
+        int n = _allErrors.Count;
         if (n == 0)
         {
             Debug.LogWarning("[GPU Painter] No valid error samples captured. Global statistics are unavailable.");
@@ -638,11 +640,70 @@ public class StlErrorPainterGPU : MonoBehaviour
         float p90 = _allErrors[(int)Mathf.Clamp(Mathf.RoundToInt(0.90f * (n - 1)), 0, n - 1)];
         float max = _allErrors[n - 1];
 
-        Debug.Log($"[GPU Painter] Global stats across {meshFilters.Length} meshes and {n} samples: mean={mean:F3}mm, rms={rms:F3}mm, P90={p90:F3}mm, P95={p95:F3}mm, max={max:F3}mm");
-        if (clipStatsAboveMaxMm)
+        Debug.Log($"[GPU Painter] Global stats across {meshFilters.Length} meshes and {n} samples, clipping values > {statsMaxMm:F1}mm were excluded from stats.");
+
+        // Final consolidated metric log
+        float lmaxMm = ComputeLmaxMm(meshFilters);
+        float per95 = p95;
+        float per95Pct = lmaxMm > 1e-6f ? per95 / lmaxMm * 100f : 0f;
+        float cov030 = CoverageBelow(_allErrors, 0.30f);
+        float cov050 = CoverageBelow(_allErrors, 0.50f);
+        float cov100 = CoverageBelow(_allErrors, 1.00f);
+        Debug.Log($"[GPU Painter] PER95 = {per95:F3} mm ({per95Pct:F2}% of Lmax)  Mean = {mean:F2} mm  DEV@{0.30f:F2}mm = {cov030*100f:F1}%  DEV@{0.50f:F2}mm = {cov050*100f:F1}%  DEV@{1.00f:F2}mm = {cov100*100f:F1}%");
+    }
+
+    float CoverageBelow(List<float> sortedAsc, float thresholdMm)
+    {
+        if (sortedAsc == null || sortedAsc.Count == 0) return 0f;
+        // assumes sorted ascending
+        int n = sortedAsc.Count;
+        int lo = 0, hi = n - 1, ans = -1;
+        while (lo <= hi)
         {
-            Debug.Log($"[GPU Painter] Stats clipping enabled: values > {statsMaxMm:F1}mm were excluded from stats. Colors are clamped to [{colorMinMm:F1},{colorMaxMm:F1}] mm.");
+            int mid = (lo + hi) >> 1;
+            if (sortedAsc[mid] <= thresholdMm) { ans = mid; lo = mid + 1; }
+            else hi = mid - 1;
         }
+        return ans < 0 ? 0f : ((ans + 1) / (float)n);
+    }
+
+    float ComputeLmaxMm(MeshFilter[] meshFilters)
+    {
+        if (meshFilters == null || meshFilters.Length == 0) return 0f;
+        bool hasBounds = false;
+        Bounds combined = new Bounds(Vector3.zero, Vector3.zero);
+        foreach (var mf in meshFilters)
+        {
+            if (!mf) continue;
+            var mr = mf.GetComponent<MeshRenderer>();
+            if (mr)
+            {
+                if (!hasBounds) { combined = mr.bounds; hasBounds = true; }
+                else combined.Encapsulate(mr.bounds);
+            }
+            else
+            {
+                var mesh = mf.sharedMesh;
+                if (!mesh) continue;
+                var local = mesh.bounds;
+                var worldCenter = mf.transform.TransformPoint(local.center);
+                var ext = local.extents;
+                var axisX = mf.transform.TransformVector(ext.x, 0, 0);
+                var axisY = mf.transform.TransformVector(0, ext.y, 0);
+                var axisZ = mf.transform.TransformVector(0, 0, ext.z);
+                var worldExt = new Vector3(
+                    Mathf.Abs(axisX.x) + Mathf.Abs(axisY.x) + Mathf.Abs(axisZ.x),
+                    Mathf.Abs(axisX.y) + Mathf.Abs(axisY.y) + Mathf.Abs(axisZ.y),
+                    Mathf.Abs(axisX.z) + Mathf.Abs(axisY.z) + Mathf.Abs(axisZ.z)
+                );
+                var b = new Bounds(worldCenter, worldExt * 2f);
+                if (!hasBounds) { combined = b; hasBounds = true; }
+                else combined.Encapsulate(b);
+            }
+        }
+        if (!hasBounds) return 0f;
+        float diagUnity = combined.size.magnitude; // world units
+        return diagUnity * mmPerUnityUnit;
     }
 
     void ReleaseBuffers()
@@ -651,6 +712,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         vertexNormalBuffer?.Release();
         vertexColorBuffer?.Release();
         errorResultBuffer?.Release();
+        errorVectorBuffer?.Release();
         rayAngleBuffer?.Release();
         verticalAngleBuffer?.Release();
         horizontalAngleBuffer?.Release();
