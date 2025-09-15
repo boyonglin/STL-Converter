@@ -1,0 +1,641 @@
+#pragma kernel CSMain
+
+// Forward declarations
+float3 GetOffsetRayDirection(float3 normal, float angleDegrees, int rayIndex);
+float3 GetRadialDirection(float3 normal, float radAngle);
+bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm);
+float4 MapBandColor(float valMm);
+
+// Buffers
+StructuredBuffer<float3> vertexPositions;   // read-only
+StructuredBuffer<float3> vertexNormals;     // read-only
+RWStructuredBuffer<float4> vertexColors;
+RWStructuredBuffer<float> errorResults;
+RWStructuredBuffer<float3> bestRayDirs; // for verification (CPU parity)
+
+// Volume data
+Texture3D<float> volumeTexture;
+SamplerState samplervolumeTexture; // Unity auto-binds sampler named 'sampler' + texture var name
+Texture2D tfTexture; // optional transfer function for visibility parity
+SamplerState samplertfTexture;
+
+// Parameters
+float4x4 worldToLocal;
+float4x4 localToWorld;
+float mmPerUnityUnit;
+float surfaceEpsMm;
+float maxProbeMm;
+int tryBothDirections;
+float densityThreshold; // 0..1 threshold to detect surface in volume
+int useTransferFunction; // 1 = use tfTexture alpha and visibility window
+float2 visibilityWindow; // min/max in normalised density
+int3 volumeDims; // dataset dims for nearest-voxel sampling
+int useNearestVoxel; // 1 = sample via nearest voxel value like CPU
+
+// Multi-directional sampling parameters
+StructuredBuffer<float> rayAngleOffsets;
+int rayAngleCount;
+int enableMultiDirectional;
+int useShortestDistance;
+
+// Surface-specific parameters
+int enableSurfaceSpecificRays;
+StructuredBuffer<float> verticalAngles;
+StructuredBuffer<float> horizontalAngles;
+StructuredBuffer<float> obliqueAngles;
+int verticalAngleCount;
+int horizontalAngleCount;
+int obliqueAngleCount;
+float verticalThreshold;
+float horizontalThreshold;
+
+// Aggressive sampling
+int enableAggressiveSampling;
+int aggressiveRayCount;
+float aggressiveMaxAngle;
+int radialDirectionCount;
+
+// Color mapping
+StructuredBuffer<float> bandEdges;
+StructuredBuffer<float4> bandColors;
+int bandCount;
+int edgeCount; // number of edges in bandEdges buffer (usually bandCount-1)
+float colorMinMm;
+float colorMaxMm;
+int reverseColorScale;
+
+// Advanced optimization
+int enableErrorWeighting;
+int useDistanceWeighting;
+float maxWeightDistanceMm;
+int enableOutlierFiltering;
+float outlierThreshold;
+int minValidSamples;
+int vertexCount; // provided by C#
+
+// Utility functions
+float3 GetOffsetRayDirection(float3 normal, float angleDegrees, int rayIndex)
+{
+    if (abs(angleDegrees) < 0.001)
+        return -normal;
+    
+    // Create orthogonal vectors
+    float3 tangent1 = cross(normal, float3(0, 1, 0));
+    if (length(tangent1) < 0.001)
+        tangent1 = cross(normal, float3(0, 0, 1));
+    tangent1 = normalize(tangent1);
+    
+    float3 tangent2 = normalize(cross(normal, tangent1));
+    
+    // Spiral sampling for better coverage
+    float angleRad = angleDegrees * (3.14159/180.0);
+    float spiralFactor = (angleDegrees / 90.0) * 3.14159 * 2 + rayIndex * 0.5;
+    float3 rotationAxis = normalize(cos(spiralFactor) * tangent1 + sin(spiralFactor) * tangent2);
+    
+    // Rotate normal around axis
+    float cosAngle = cos(angleRad);
+    float sinAngle = sin(angleRad);
+    float3 offsetNormal = normal * cosAngle + cross(rotationAxis, normal) * sinAngle + 
+                         rotationAxis * dot(rotationAxis, normal) * (1 - cosAngle);
+    
+    return -normalize(offsetNormal);
+}
+
+float3 GetRadialDirection(float3 normal, float radAngle)
+{
+    float3 tangent1 = cross(normal, float3(0, 1, 0));
+    if (length(tangent1) < 0.001)
+        tangent1 = cross(normal, float3(1, 0, 0));
+    tangent1 = normalize(tangent1);
+    
+    float3 tangent2 = normalize(cross(normal, tangent1));
+    float3 radialDir = cos(radAngle) * tangent1 + sin(radAngle) * tangent2;
+    
+    return normalize(-normal * 0.7 + radialDir * 0.3);
+}
+
+bool IsVisible(float density)
+{
+    // visibility window (normalised)
+    if (density < visibilityWindow.x || density > visibilityWindow.y)
+        return false;
+    if (useTransferFunction == 1)
+    {
+        float4 tfc = tfTexture.SampleLevel(samplertfTexture, float2(density, 0.5), 0);
+        return tfc.a > 0.0;
+    }
+    else
+    {
+        return density > densityThreshold;
+    }
+}
+
+bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm)
+{
+    errorMm = 1e10;
+    
+    // Ray starting point (offset from surface)
+    float3 rayStart = worldPos + rayDir * eps;
+    float3 rayDirIn = -rayDir;
+    
+    // Step sizes
+    const float stepLocal = 0.01; // CPU parity step in volume local units
+    const float stepSizeCpu = stepLocal; // local units
+    // Non-parity: ~0.25mm or 1% of range (world units)
+    float stepSizeFast = min( (0.25 / mmPerUnityUnit), maxU * 0.01 );
+    float stepSize = (useNearestVoxel == 1) ? stepSizeCpu : stepSizeFast;
+    float maxDist = maxU; // world units
+    
+    // Find volume surface by marching along ray
+    float3 volumeHitPoint = worldPos; // Default fallback
+    bool foundVolume = false;
+    
+    // Ensure start is outside the volume if possible (handle local/world coherently)
+    float3 startPos = rayStart;
+    float3 startLocalN = mul(worldToLocal, float4(startPos, 1)).xyz + 0.5; // [0,1]
+    float startDensity = -1.0;
+    if (startLocalN.x >= 0 && startLocalN.y >= 0 && startLocalN.z >= 0 &&
+        startLocalN.x <= 1 && startLocalN.y <= 1 && startLocalN.z <= 1)
+    {
+        startDensity = volumeTexture.SampleLevel(samplervolumeTexture, startLocalN, 0).r;
+    }
+    if (IsVisible(startDensity))
+    {
+        [unroll]
+        for (int k = 1; k <= 5; k++)
+        {
+            if (useNearestVoxel == 1)
+            {
+                float3 sLocal = mul(worldToLocal, float4(worldPos, 1)).xyz;
+                float3 dLocal = normalize(mul(worldToLocal, float4(rayDir, 0)).xyz);
+                float3 pL = sLocal + dLocal * (eps + stepLocal * k);
+                float3 lpN = pL + 0.5;
+                if (lpN.x >= 0 && lpN.y >= 0 && lpN.z >= 0 && lpN.x <= 1 && lpN.y <= 1 && lpN.z <= 1)
+                {
+                    float d = volumeTexture.SampleLevel(samplervolumeTexture, lpN, 0).r;
+                    if (!IsVisible(d)) { startPos = mul(localToWorld, float4(pL, 1)).xyz; break; }
+                }
+                else { startPos = mul(localToWorld, float4(pL, 1)).xyz; break; }
+            }
+            else
+            {
+                float3 p = worldPos + rayDir * (eps + stepSize * k);
+                float3 lp = mul(worldToLocal, float4(p, 1)).xyz + 0.5;
+                if (lp.x >= 0 && lp.y >= 0 && lp.z >= 0 && lp.x <= 1 && lp.y <= 1 && lp.z <= 1)
+                {
+                    float d = volumeTexture.SampleLevel(samplervolumeTexture, lp, 0).r;
+                    if (!IsVisible(d)) { startPos = p; break; }
+                }
+                else { startPos = p; break; }
+            }
+        }
+    }
+
+    float3 prevPos = startPos;
+    float3 prevVolPos = mul(worldToLocal, float4(prevPos, 1)).xyz + 0.5;
+    float prevD = -1.0;
+    if (prevVolPos.x >= 0 && prevVolPos.y >= 0 && prevVolPos.z >= 0 &&
+        prevVolPos.x <= 1 && prevVolPos.y <= 1 && prevVolPos.z <= 1)
+        prevD = volumeTexture.SampleLevel(samplervolumeTexture, prevVolPos, 0).r;
+
+    if (useNearestVoxel == 1)
+    {
+        // CPU parity: march in local space and stop at AABB exit or maxU
+        float3 startLocal = mul(worldToLocal, float4(startPos, 1)).xyz;
+        float3 dirLocal = normalize(mul(worldToLocal, float4(rayDirIn, 0)).xyz);
+        float3 prevLocal = startLocal;
+        float prevDLocal = -1.0;
+        for (float tl = 0.0; tl <= 10000.0; tl += stepLocal)
+        {
+            float3 localPos = startLocal + dirLocal * tl;
+            float3 volumePos = localPos + 0.5;
+            // Stop if outside AABB
+            if (!(volumePos.x >= 0 && volumePos.y >= 0 && volumePos.z >= 0 && volumePos.x <= 1 && volumePos.y <= 1 && volumePos.z <= 1))
+                break;
+            float3 samplePos = mul(localToWorld, float4(localPos, 1)).xyz;
+            // Stop if exceeded max world distance
+            if (length(samplePos - worldPos) > maxU)
+                break;
+            float density;
+            int ix = clamp((int)round(volumePos.x * (volumeDims.x - 1)), 0, volumeDims.x - 1);
+            int iy = clamp((int)round(volumePos.y * (volumeDims.y - 1)), 0, volumeDims.y - 1);
+            int iz = clamp((int)round(volumePos.z * (volumeDims.z - 1)), 0, volumeDims.z - 1);
+            float3 uvw = float3((ix + 0.5) / volumeDims.x, (iy + 0.5) / volumeDims.y, (iz + 0.5) / volumeDims.z);
+            density = volumeTexture.SampleLevel(samplervolumeTexture, uvw, 0).r;
+            if (prevDLocal < 0)
+            {
+                if (IsVisible(density)) { volumeHitPoint = samplePos; foundVolume = true; break; }
+            }
+            else
+            {
+                if (!IsVisible(prevDLocal) && IsVisible(density))
+                {
+                    // Use the current sample position as CPU would (first visible)
+                    volumeHitPoint = samplePos;
+                    foundVolume = true;
+                    break;
+                }
+            }
+            prevDLocal = density;
+            prevLocal = localPos;
+            prevPos = samplePos;
+        }
+    }
+    else
+    {
+        for (float t = 0; t < maxDist; t += stepSize)
+        {
+            float3 samplePos = startPos + rayDirIn * t;
+            
+            // Transform to volume local space (centered at 0) then to [0..1]
+            float3 volumePos = mul(worldToLocal, float4(samplePos, 1)).xyz + 0.5;
+            
+            // Check if inside volume bounds (explicit to help IDEs)
+            if (volumePos.x >= 0 && volumePos.y >= 0 && volumePos.z >= 0 &&
+                volumePos.x <= 1 && volumePos.y <= 1 && volumePos.z <= 1)
+            {
+                float density = volumeTexture.SampleLevel(samplervolumeTexture, volumePos, 0).r;
+                // Handle first-inside-visible or crossing from not visible to visible
+                if (prevD < 0)
+                {
+                    if (IsVisible(density))
+                    {
+                        volumeHitPoint = samplePos;
+                        foundVolume = true;
+                        break;
+                    }
+                }
+                else if (!IsVisible(prevD) && IsVisible(density))
+                {
+                    // Linear interpolate along the segment for sub-step precision
+                    float thr = densityThreshold;
+                    float denom = max(1e-6, density - prevD);
+                    float alpha = saturate((thr - prevD) / denom);
+                    volumeHitPoint = lerp(prevPos, samplePos, alpha);
+                    foundVolume = true;
+                    break;
+                }
+                prevD = density;
+                prevPos = samplePos;
+            }
+        }
+    }
+    
+    if (!foundVolume && tryBothDirections)
+    {
+        // Try reverse direction
+    rayStart = worldPos - rayDir * eps;
+        rayDirIn = rayDir;
+
+        // Ensure start outside for reverse too
+        startPos = rayStart;
+        float3 startLocalN2 = mul(worldToLocal, float4(startPos, 1)).xyz + 0.5;
+        startDensity = -1.0;
+        if (startLocalN2.x >= 0 && startLocalN2.y >= 0 && startLocalN2.z >= 0 &&
+            startLocalN2.x <= 1 && startLocalN2.y <= 1 && startLocalN2.z <= 1)
+        {
+            startDensity = volumeTexture.SampleLevel(samplervolumeTexture, startLocalN2, 0).r;
+        }
+        if (IsVisible(startDensity))
+        {
+            [unroll]
+            for (int k = 1; k <= 5; k++)
+            {
+                if (useNearestVoxel == 1)
+                {
+                    float3 sLocal = mul(worldToLocal, float4(worldPos, 1)).xyz;
+                    float3 dLocal = normalize(mul(worldToLocal, float4(-rayDir, 0)).xyz);
+                    float3 pL = sLocal + dLocal * (eps + stepLocal * k);
+                    float3 lpN = pL + 0.5;
+                    if (lpN.x >= 0 && lpN.y >= 0 && lpN.z >= 0 && lpN.x <= 1 && lpN.y <= 1 && lpN.z <= 1)
+                    {
+                        float d = volumeTexture.SampleLevel(samplervolumeTexture, lpN, 0).r;
+                        if (!IsVisible(d)) { startPos = mul(localToWorld, float4(pL, 1)).xyz; break; }
+                    }
+                    else { startPos = mul(localToWorld, float4(pL, 1)).xyz; break; }
+                }
+                else
+                {
+                    float3 p = worldPos - rayDir * (eps + stepSize * k);
+                    float3 lp = mul(worldToLocal, float4(p, 1)).xyz + 0.5;
+                    if (lp.x >= 0 && lp.y >= 0 && lp.z >= 0 && lp.x <= 1 && lp.y <= 1 && lp.z <= 1)
+                    {
+                        float d = volumeTexture.SampleLevel(samplervolumeTexture, lp, 0).r;
+                        if (!IsVisible(d)) { startPos = p; break; }
+                    }
+                    else { startPos = p; break; }
+                }
+            }
+        }
+        prevPos = startPos;
+        prevVolPos = mul(worldToLocal, float4(prevPos, 1)).xyz + 0.5;
+        prevD = -1.0;
+        if (prevVolPos.x >= 0 && prevVolPos.y >= 0 && prevVolPos.z >= 0 &&
+            prevVolPos.x <= 1 && prevVolPos.y <= 1 && prevVolPos.z <= 1)
+            prevD = volumeTexture.SampleLevel(samplervolumeTexture, prevVolPos, 0).r;
+
+        if (useNearestVoxel == 1)
+        {
+            float3 startLocal = mul(worldToLocal, float4(startPos, 1)).xyz;
+            float3 dirLocal = normalize(mul(worldToLocal, float4(rayDirIn, 0)).xyz);
+            float prevDLocal2 = -1.0;
+            for (float tl = 0.0; tl <= 10000.0; tl += stepLocal)
+            {
+                float3 localPos = startLocal + dirLocal * tl;
+                float3 volumePos = localPos + 0.5;
+                if (!(volumePos.x >= 0 && volumePos.y >= 0 && volumePos.z >= 0 && volumePos.x <= 1 && volumePos.y <= 1 && volumePos.z <= 1))
+                    break;
+                float3 samplePos = mul(localToWorld, float4(localPos, 1)).xyz;
+                if (length(samplePos - worldPos) > maxU)
+                    break;
+                int ix = clamp((int)round(volumePos.x * (volumeDims.x - 1)), 0, volumeDims.x - 1);
+                int iy = clamp((int)round(volumePos.y * (volumeDims.y - 1)), 0, volumeDims.y - 1);
+                int iz = clamp((int)round(volumePos.z * (volumeDims.z - 1)), 0, volumeDims.z - 1);
+                float3 uvw = float3((ix + 0.5) / volumeDims.x, (iy + 0.5) / volumeDims.y, (iz + 0.5) / volumeDims.z);
+                float density = volumeTexture.SampleLevel(samplervolumeTexture, uvw, 0).r;
+                if (prevDLocal2 < 0)
+                {
+                    if (IsVisible(density)) { volumeHitPoint = samplePos; foundVolume = true; break; }
+                }
+                else if (!IsVisible(prevDLocal2) && IsVisible(density))
+                {
+                    volumeHitPoint = samplePos;
+                    foundVolume = true;
+                    break;
+                }
+                prevDLocal2 = density;
+                prevPos = samplePos;
+            }
+        }
+        else
+        {
+            for (float t = 0; t < maxDist; t += stepSize)
+            {
+                float3 samplePos = startPos + rayDirIn * t;
+                float3 volumePos = mul(worldToLocal, float4(samplePos, 1)).xyz + 0.5;
+                
+                if (volumePos.x >= 0 && volumePos.y >= 0 && volumePos.z >= 0 &&
+                    volumePos.x <= 1 && volumePos.y <= 1 && volumePos.z <= 1)
+                {
+                    float density = volumeTexture.SampleLevel(samplervolumeTexture, volumePos, 0).r;
+                    // First-inside-visible or crossing from not visible to visible
+                    if (prevD < 0)
+                    {
+                        if (IsVisible(density))
+                        {
+                            volumeHitPoint = samplePos;
+                            foundVolume = true;
+                            break;
+                        }
+                    }
+                    else if (!IsVisible(prevD) && IsVisible(density))
+                    {
+                        float thr = densityThreshold;
+                        float denom = max(1e-6, density - prevD);
+                        float alpha = saturate((thr - prevD) / denom);
+                        volumeHitPoint = lerp(prevPos, samplePos, alpha);
+                        foundVolume = true;
+                        break;
+                    }
+                    prevD = density;
+                    prevPos = samplePos;
+                }
+            }
+        }
+    }
+    
+    if (foundVolume)
+    {
+        errorMm = length(volumeHitPoint - worldPos) * mmPerUnityUnit;
+        return true;
+    }
+    
+    return false;
+}
+
+float4 MapBandColor(float valMm)
+{
+    // Clamp to color range
+    float v = clamp(valMm, min(colorMinMm, colorMaxMm), max(colorMinMm, colorMaxMm));
+    
+    // Find appropriate band
+    int idx = 0;
+    int ec = max(1, edgeCount);
+    for (int i = 0; i < ec; i++)
+    {
+        if (v <= bandEdges[i])
+            break;
+        idx++;
+    }
+    
+    // Apply color reversal if enabled
+    if (reverseColorScale)
+        idx = (bandCount - 1) - idx;
+    
+    idx = clamp(idx, 0, bandCount - 1);
+    return bandColors[idx];
+}
+
+[numthreads(64,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    uint vertexIndex = id.x;
+    if (vertexIndex >= (uint)vertexCount)
+        return;
+        
+    float3 vertexPos = vertexPositions[vertexIndex];
+    float3 normal = normalize(vertexNormals[vertexIndex]);
+    
+    // Convert to Unity units
+    float eps = surfaceEpsMm / mmPerUnityUnit;
+    float maxU = maxProbeMm / mmPerUnityUnit;
+    
+    // Multi-ray sampling for accuracy
+    float bestErrorMm = 1e10;
+    float4 bestColor = float4(0.5, 0.5, 0.5, 1);
+    bool foundHit = false;
+    float3 bestRay = -normal; // default
+    
+    // Store all ray results for intelligent weighting
+    float rayErrors[32]; // Max 32 rays
+    float rayWeights[32];
+    int validRayCount = 0;
+    
+    // Surface type classification
+    float verticalDot = abs(dot(normal, float3(0, 1, 0)));
+    int surfaceType = 2; // 0=vertical, 1=horizontal, 2=oblique
+    if (verticalDot > verticalThreshold)
+        surfaceType = 0;
+    else if (verticalDot < horizontalThreshold)
+        surfaceType = 1;
+    
+    // Determine ray angles based on surface type
+    int angleCount = enableMultiDirectional != 0 ? rayAngleCount : 1;
+    if (enableSurfaceSpecificRays)
+    {
+        if (surfaceType == 0) angleCount = max(1, verticalAngleCount);
+        else if (surfaceType == 1) angleCount = max(1, horizontalAngleCount);
+        else angleCount = max(1, obliqueAngleCount);
+    }
+    
+    // Main ray sampling loop
+    [loop]
+    for (int i = 0; i < min(angleCount, 32); i++)
+    {
+    float angle = 0;
+        if (enableSurfaceSpecificRays)
+        {
+            if (surfaceType == 0 && i < verticalAngleCount)
+                angle = verticalAngles[i];
+            else if (surfaceType == 1 && i < horizontalAngleCount)
+                angle = horizontalAngles[i];
+            else if (surfaceType == 2 && i < obliqueAngleCount)
+                angle = obliqueAngles[i];
+        }
+        else if (i < rayAngleCount)
+        {
+            angle = rayAngleOffsets[i];
+        }
+        
+        // Generate ray direction with offset
+        float3 rayDir = GetOffsetRayDirection(normal, angle, i);
+        
+        // Probe in this direction
+        float errorMm;
+        if (ProbeDirection(vertexPos, rayDir, eps, maxU, errorMm))
+        {
+            if (validRayCount < 32)
+            {
+                rayErrors[validRayCount] = errorMm;
+                
+                // Calculate weight for this ray
+                float weight = 1.0;
+                if (enableErrorWeighting)
+                {
+                    // Distance weight
+                    if (useDistanceWeighting)
+                        weight *= exp(-errorMm / maxWeightDistanceMm);
+                    // Angle weight (0 degree has highest weight)
+                    weight *= exp(-abs(angle) / 90.0);
+                    // Accuracy weight
+                    weight *= 1.0 / (1.0 + errorMm);
+                }
+                
+                rayWeights[validRayCount] = weight;
+                validRayCount++;
+            }
+            
+            foundHit = true;
+            
+            if (useShortestDistance && errorMm < bestErrorMm)
+            {
+                bestErrorMm = errorMm;
+                bestRay = rayDir;
+            }
+        }
+    }
+    
+    // Aggressive sampling for complex geometry
+    if (enableAggressiveSampling && foundHit && validRayCount > 0)
+    {
+        // Add radial sampling
+        [loop]
+        for (int r = 0; r < min(radialDirectionCount, 16); r++)
+        {
+            if (validRayCount >= 32) break;
+            
+            float radAngle = (r * 2.0 * 3.14159) / radialDirectionCount;
+            float3 radialDir = GetRadialDirection(normal, radAngle);
+            
+            float errorMm;
+            if (ProbeDirection(vertexPos, radialDir, eps, maxU, errorMm))
+            {
+                rayErrors[validRayCount] = errorMm;
+                rayWeights[validRayCount] = 0.5; // Lower weight for aggressive samples
+                validRayCount++;
+                if (useShortestDistance && errorMm < bestErrorMm) { bestErrorMm = errorMm; bestRay = radialDir; }
+            }
+        }
+    }
+    
+    // Process results with outlier filtering and weighting
+    if (validRayCount > 0)
+    {
+        // Outlier filtering
+        if (enableOutlierFiltering && validRayCount >= minValidSamples)
+        {
+            // Calculate mean and std dev
+            float mean = 0;
+            for (int i = 0; i < validRayCount; i++)
+                mean += rayErrors[i];
+            mean /= validRayCount;
+            
+            float variance = 0;
+            for (int i = 0; i < validRayCount; i++)
+            {
+                float diff = rayErrors[i] - mean;
+                variance += diff * diff;
+            }
+            float stdDev = sqrt(variance / validRayCount);
+            
+            // Filter outliers
+            int filteredCount = 0;
+            for (int i = 0; i < validRayCount; i++)
+            {
+                if (abs(rayErrors[i] - mean) <= outlierThreshold * stdDev)
+                {
+                    rayErrors[filteredCount] = rayErrors[i];
+                    rayWeights[filteredCount] = rayWeights[i];
+                    filteredCount++;
+                }
+            }
+            
+            if (filteredCount >= minValidSamples)
+                validRayCount = filteredCount;
+        }
+        
+        // Weighted average or best result
+        if (enableErrorWeighting && validRayCount > 1)
+        {
+            float totalWeight = 0;
+            float weightedError = 0;
+            
+            for (int i = 0; i < validRayCount; i++)
+            {
+                totalWeight += rayWeights[i];
+                weightedError += rayErrors[i] * rayWeights[i];
+            }
+            
+            if (totalWeight > 0.001)
+            {
+                bestErrorMm = weightedError / totalWeight;
+                // Keep bestRay as the shortest so CPU verify uses a sensible direction
+            }
+            else
+                bestErrorMm = rayErrors[0]; // Fallback to first result
+        }
+        else if (useShortestDistance)
+        {
+            // Find minimum error
+            bestErrorMm = rayErrors[0];
+            bestRay = normal; // will be overwritten below
+            for (int i = 1; i < validRayCount; i++)
+            {
+                if (rayErrors[i] < bestErrorMm)
+                    bestErrorMm = rayErrors[i];
+            }
+        }
+        else
+        {
+            bestErrorMm = rayErrors[0]; // Use first valid result
+        }
+        
+        // Map to color
+        bestColor = MapBandColor(bestErrorMm);
+    }
+    
+    // Store results
+    errorResults[vertexIndex] = foundHit ? bestErrorMm : -1.0;
+    vertexColors[vertexIndex] = bestColor;
+    bestRayDirs[vertexIndex] = bestRay;
+}
