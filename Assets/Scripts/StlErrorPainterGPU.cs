@@ -650,7 +650,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
 
         Debug.Log($"[GPU Painter] Global statistics across {meshFilters.Length} meshes based on ALL {stats.sampleCount} unclipped error samples (including values > {statsMaxMm:F1}mm visualization threshold).");
-        Debug.Log($"[GPU Painter] PER95 = {stats.p95:F3} mm ({stats.per95Pct:F2}% of Lmax)  Mean = {stats.mean:F2} mm  DEV@{0.05f:F2}mm = {stats.cov005*100f:F1}%  DEV@{0.30f:F2}mm = {stats.cov030*100f:F1}%  DEV@{0.50f:F2}mm = {stats.cov050*100f:F1}%  DEV@{1.00f:F2}mm = {stats.cov100*100f:F1}%");
+        Debug.Log($"[GPU Painter] PER95 = {stats.p95:F3} mm ({stats.per95Pct:F2}% of Lmax)  Mean = {stats.mean:F2} mm  Max = {stats.max:F2} mm  DEV@{0.05f:F2}mm = {stats.cov005*100f:F1}%  DEV@{0.30f:F2}mm = {stats.cov030*100f:F1}%  DEV@{1.00f:F2}mm = {stats.cov100*100f:F1}%");
     }
 
     struct GlobalStats
@@ -663,7 +663,6 @@ public class StlErrorPainterGPU : MonoBehaviour
         public float per95Pct;
         public float cov005;
         public float cov030;
-        public float cov050;
         public float cov100;
     }
 
@@ -696,7 +695,6 @@ public class StlErrorPainterGPU : MonoBehaviour
         stats.per95Pct = stats.lmaxMm > 1e-6f ? (stats.p95 / stats.lmaxMm * 100f) : 0f;
         stats.cov005 = CoverageBelow(sorted, 0.05f);
         stats.cov030 = CoverageBelow(sorted, 0.30f);
-        stats.cov050 = CoverageBelow(sorted, 0.50f);
         stats.cov100 = CoverageBelow(sorted, 1.00f);
         return stats;
     }
