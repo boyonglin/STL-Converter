@@ -1,16 +1,18 @@
 using System;
-using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using UnityEngine;
+using UnityVolumeRendering;
 
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
 
-using UnityVolumeRendering;
-
+/// <summary>
+/// GPU-accelerated STL error painter that computes surface deviation between STL meshes and DICOM volume data.
+/// Uses compute shaders for high-performance vertex-level error calculation and color mapping.
+/// </summary>
 [ExecuteAlways]
 public class StlErrorPainterGPU : MonoBehaviour
 {
@@ -28,6 +30,8 @@ public class StlErrorPainterGPU : MonoBehaviour
     [Tooltip("Density threshold (0..1) used when detecting the DICOM surface in the volume texture")]
     [Range(0f, 1f)]
     public float densityThreshold = 0.10f;
+    [Tooltip("Refine iso-surface intersection after initial hit using bracket + bisection to reduce wrong-layer picks")]
+    public bool enableRefinedIntersection = true;
     
     [Header("Multi-directional sampling")]
     public bool enableMultiDirectional = true;
@@ -73,15 +77,15 @@ public class StlErrorPainterGPU : MonoBehaviour
     
     [Header("Color range")]
     public float colorMinMm = 0f;
-    public float colorMaxMm = 3f;
+    public float colorMaxMm = 0.3f; // Increased from 3f to allow higher error visualization
     public bool autoBandsFromRange = true;
     public bool reverseColorScale = false;
 
     [Header("Stats clipping")]
     [Tooltip("Exclude samples with error above this from per-mesh and global statistics. Colors still clamp to Color range.")]
-    public bool clipStatsAboveMaxMm = true;
+    public bool clipStatsAboveMaxMm = false; // Disabled by default to include all samples
     [Tooltip("Maximum error (mm) to include in statistics when clipping is enabled.")]
-    public float statsMaxMm = 3f;
+    public float statsMaxMm = 20f; // Increased from 3f to match color range
 
     [Header("GPU Compute")]
     public ComputeShader errorPainterCompute;
@@ -103,7 +107,6 @@ public class StlErrorPainterGPU : MonoBehaviour
     ComputeBuffer obliqueAngleBuffer;
     ComputeBuffer bandEdgeBuffer;
     ComputeBuffer bandColorBuffer;
-    // Removed: bestDirBuffer previously used for CPU validation of best ray directions
 
     // Volume data
     VolumeRenderedObject primaryVolume;
@@ -113,15 +116,25 @@ public class StlErrorPainterGPU : MonoBehaviour
     Vector2 visibilityWindow = new Vector2(0f, 1f);
     int dimX, dimY, dimZ;
 
+    /// <summary>
+    /// Initiates GPU-accelerated error calculation and color baking for all STL meshes.
+    /// </summary>
     [ContextMenu("GPU Bake Colors")]
     public void BakeGPU()
     {
-    RunCoroutineSmart(BakeGPUCoroutine());
+        RunCoroutineSmart(BakeGPUCoroutine());
     }
 
+    /// <summary>
+    /// Main coroutine that handles the complete GPU baking process.
+    /// </summary>
     IEnumerator BakeGPUCoroutine()
     {
-    Debug.Log("[GPU Painter] Starting GPU bake...");
+        Debug.Log("[GPU Painter] Starting GPU bake...");
+        
+        // 清空前次結果，避免累加舊數據
+        _allErrors.Clear();
+        
         if (!dicomRoot || !stlRoot)
         {
             Debug.LogError("[GPU Painter] Please set dicomRoot / stlRoot");
@@ -160,14 +173,21 @@ public class StlErrorPainterGPU : MonoBehaviour
             yield break;
         }
 
-    // Get volume texture
+        // Get volume texture
         volumeTexture = primaryVolume.dataset.GetDataTexture();
-    // Get transfer function and visibility window for CPU parity
-    tfTexture = null;
-    try { tfTexture = primaryVolume.transferFunction != null ? primaryVolume.transferFunction.GetTexture() : null; }
-    catch {}
-    visibilityWindow = primaryVolume.GetVisibilityWindow();
-    dimX = primaryVolume.dataset.dimX; dimY = primaryVolume.dataset.dimY; dimZ = primaryVolume.dataset.dimZ;
+        
+        // Get transfer function and visibility window for CPU parity
+        tfTexture = null;
+        try 
+        { 
+            tfTexture = primaryVolume.transferFunction != null ? primaryVolume.transferFunction.GetTexture() : null; 
+        }
+        catch { }
+        
+        visibilityWindow = primaryVolume.GetVisibilityWindow();
+        dimX = primaryVolume.dataset.dimX; 
+        dimY = primaryVolume.dataset.dimY; 
+        dimZ = primaryVolume.dataset.dimZ;
         if (!volumeTexture)
         {
             Debug.LogError("[GPU Painter] No volume texture found");
@@ -262,7 +282,6 @@ public class StlErrorPainterGPU : MonoBehaviour
         int totalVertices = worldVertices.Length;
         var allColors = new Color[totalVertices];
         var allErrors = new float[totalVertices];
-        // Removed: per-vertex best ray direction aggregation (debug-only)
 
         int batchCount = Mathf.CeilToInt((float)totalVertices / maxVerticesPerBatch);
         Debug.Log($"[GPU Painter] Large mesh detected. Processing {totalVertices} vertices in {batchCount} batches of max {maxVerticesPerBatch} vertices each.");
@@ -476,32 +495,30 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
 
         // Calculate stats for this mesh
-        int valid = 0; double sum = 0, sum2 = 0; int clipped = 0;
+        int valid = 0; double sum = 0; int clipped = 0;
         for (int i = 0; i < errors.Length; i++)
         {
             float e = errors[i];
             if (e >= 0 && float.IsFinite(e))
             {
+                _allErrors.Add(e); // 收集所有有效樣本，不截斷（用於全域統計）
                 if (clipStatsAboveMaxMm && e > statsMaxMm) { clipped++; continue; }
-                valid++; sum += e; sum2 += (double)e * e; _allErrors.Add(e);
+                valid++; sum += e;
             }
         }
         if (valid > 0)
         {
             double mean = sum / valid;
-            double rms = Math.Sqrt(sum2 / valid);
             if (clipStatsAboveMaxMm && clipped > 0)
-                Debug.Log($"[GPU Painter] {meshFilter.name}: valid={valid}/{errors.Length}, mean={mean:F3}mm, rms={rms:F3}mm, clipped>{statsMaxMm:F1}mm: {clipped}");
+                Debug.Log($"[GPU Painter] {meshFilter.name}: valid={valid}/{errors.Length}, mean={mean:F3}mm, clipped>{statsMaxMm:F1}mm: {clipped}");
             else
-                Debug.Log($"[GPU Painter] {meshFilter.name}: valid={valid}/{errors.Length}, mean={mean:F3}mm, rms={rms:F3}mm");
+                Debug.Log($"[GPU Painter] {meshFilter.name}: valid={valid}/{errors.Length}, mean={mean:F3}mm");
         }
         else
         {
             Debug.LogWarning($"[GPU Painter] {meshFilter.name}: No valid samples were found. Check alignment with the volume, increase maxProbeMm (current {maxProbeMm}mm), or adjust densityThreshold (current {densityThreshold}).");
         }
     }
-
-    // Removed legacy helper previously used during CPU validation
 
     void CreateBuffers(int vertexCount)
     {
@@ -567,6 +584,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         errorPainterCompute.SetFloat("densityThreshold", densityThreshold);
         // Explicitly use interpolated sampling, not nearest-voxel parity
         errorPainterCompute.SetInt("useNearestVoxel", 0);
+        errorPainterCompute.SetInt("enableRefine", enableRefinedIntersection ? 1 : 0);
 
         // Sampling parameters
         errorPainterCompute.SetInt("rayAngleCount", rayAngleOffsets.Length);
@@ -624,32 +642,63 @@ public class StlErrorPainterGPU : MonoBehaviour
 
     void CalculateStatistics(MeshFilter[] meshFilters)
     {
-        int n = _allErrors.Count;
-        if (n == 0)
+        var stats = ComputeGlobalStats(_allErrors, meshFilters);
+        if (stats.sampleCount == 0)
         {
             Debug.LogWarning("[GPU Painter] No valid error samples captured. Global statistics are unavailable.");
             return;
         }
 
-        _allErrors.Sort();
-        double sum = 0, sum2 = 0;
-        for (int i = 0; i < n; i++) { double v = _allErrors[i]; sum += v; sum2 += v * v; }
-        double mean = sum / n;
-        double rms = Math.Sqrt(sum2 / n);
-        float p95 = _allErrors[(int)Mathf.Clamp(Mathf.RoundToInt(0.95f * (n - 1)), 0, n - 1)];
-        float p90 = _allErrors[(int)Mathf.Clamp(Mathf.RoundToInt(0.90f * (n - 1)), 0, n - 1)];
-        float max = _allErrors[n - 1];
+        Debug.Log($"[GPU Painter] Global statistics across {meshFilters.Length} meshes based on ALL {stats.sampleCount} unclipped error samples (including values > {statsMaxMm:F1}mm visualization threshold).");
+        Debug.Log($"[GPU Painter] PER95 = {stats.p95:F3} mm ({stats.per95Pct:F2}% of Lmax)  Mean = {stats.mean:F2} mm  DEV@{0.05f:F2}mm = {stats.cov005*100f:F1}%  DEV@{0.30f:F2}mm = {stats.cov030*100f:F1}%  DEV@{0.50f:F2}mm = {stats.cov050*100f:F1}%  DEV@{1.00f:F2}mm = {stats.cov100*100f:F1}%");
+    }
 
-        Debug.Log($"[GPU Painter] Global stats across {meshFilters.Length} meshes and {n} samples, clipping values > {statsMaxMm:F1}mm were excluded from stats.");
+    struct GlobalStats
+    {
+        public int sampleCount;
+        public float mean;
+        public float p95;
+        public float max;
+        public float lmaxMm;
+        public float per95Pct;
+        public float cov005;
+        public float cov030;
+        public float cov050;
+        public float cov100;
+    }
 
-        // Final consolidated metric log
-        float lmaxMm = ComputeLmaxMm(meshFilters);
-        float per95 = p95;
-        float per95Pct = lmaxMm > 1e-6f ? per95 / lmaxMm * 100f : 0f;
-        float cov030 = CoverageBelow(_allErrors, 0.30f);
-        float cov050 = CoverageBelow(_allErrors, 0.50f);
-        float cov100 = CoverageBelow(_allErrors, 1.00f);
-        Debug.Log($"[GPU Painter] PER95 = {per95:F3} mm ({per95Pct:F2}% of Lmax)  Mean = {mean:F2} mm  DEV@{0.30f:F2}mm = {cov030*100f:F1}%  DEV@{0.50f:F2}mm = {cov050*100f:F1}%  DEV@{1.00f:F2}mm = {cov100*100f:F1}%");
+    GlobalStats ComputeGlobalStats(List<float> errors, MeshFilter[] meshFilters)
+    {
+        var stats = new GlobalStats();
+        if (errors == null || errors.Count == 0)
+        {
+            stats.sampleCount = 0;
+            return stats;
+        }
+
+        // Work on a sorted copy to avoid mutating original order if needed elsewhere
+        var sorted = new List<float>(errors);
+        sorted.Sort();
+        int n = sorted.Count;
+        stats.sampleCount = n;
+
+        double sum = 0;
+        for (int i = 0; i < n; i++)
+        {
+            double v = sorted[i];
+            sum += v;
+        }
+        stats.mean = (float)(sum / n);
+        stats.p95 = sorted[(int)Mathf.Clamp(Mathf.RoundToInt(0.95f * (n - 1)), 0, n - 1)];
+        stats.max = sorted[n - 1];
+
+        stats.lmaxMm = ComputeLmaxMm(meshFilters);
+        stats.per95Pct = stats.lmaxMm > 1e-6f ? (stats.p95 / stats.lmaxMm * 100f) : 0f;
+        stats.cov005 = CoverageBelow(sorted, 0.05f);
+        stats.cov030 = CoverageBelow(sorted, 0.30f);
+        stats.cov050 = CoverageBelow(sorted, 0.50f);
+        stats.cov100 = CoverageBelow(sorted, 1.00f);
+        return stats;
     }
 
     float CoverageBelow(List<float> sortedAsc, float thresholdMm)
@@ -702,8 +751,9 @@ public class StlErrorPainterGPU : MonoBehaviour
             }
         }
         if (!hasBounds) return 0f;
-        float diagUnity = combined.size.magnitude; // world units
-        return diagUnity * mmPerUnityUnit;
+        // 使用最長邊而非對角線作為 Lmax
+        float lmaxUnity = Mathf.Max(combined.size.x, combined.size.y, combined.size.z);
+        return lmaxUnity * mmPerUnityUnit;
     }
 
     void ReleaseBuffers()
@@ -730,4 +780,5 @@ public class StlErrorPainterGPU : MonoBehaviour
     {
         ReleaseBuffers();
     }
+
 }

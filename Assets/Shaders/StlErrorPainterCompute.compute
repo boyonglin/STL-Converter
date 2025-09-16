@@ -5,6 +5,7 @@ float3 GetOffsetRayDirection(float3 normal, float angleDegrees, int rayIndex);
 float3 GetRadialDirection(float3 normal, float radAngle);
 bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm, out float3 dispMm);
 float4 MapBandColor(float valMm);
+float3 SampleGradN(float3 pN);
 
 // Buffers
 StructuredBuffer<float3> vertexPositions;   // read-only
@@ -31,6 +32,7 @@ int useTransferFunction; // 1 = use tfTexture alpha and visibility window
 float2 visibilityWindow; // min/max in normalised density
 int3 volumeDims; // dataset dims for nearest-voxel sampling
 int useNearestVoxel; // 1 = sample via nearest voxel value like CPU
+int enableRefine; // 1 = refine surface intersection with bracketing/bisection
 
 // Multi-directional sampling parameters
 StructuredBuffer<float> rayAngleOffsets;
@@ -129,6 +131,22 @@ bool IsVisible(float density)
     }
 }
 
+// Central difference gradient in normalised texture coordinates [0,1]
+float3 SampleGradN(float3 pN)
+{
+    float hx = 1.0 / max(1.0, float(volumeDims.x));
+    float hy = 1.0 / max(1.0, float(volumeDims.y));
+    float hz = 1.0 / max(1.0, float(volumeDims.z));
+
+    float dx = volumeTexture.SampleLevel(samplervolumeTexture, float3(saturate(pN.x + hx), pN.y, pN.z), 0).r
+            - volumeTexture.SampleLevel(samplervolumeTexture, float3(saturate(pN.x - hx), pN.y, pN.z), 0).r;
+    float dy = volumeTexture.SampleLevel(samplervolumeTexture, float3(pN.x, saturate(pN.y + hy), pN.z), 0).r
+            - volumeTexture.SampleLevel(samplervolumeTexture, float3(pN.x, saturate(pN.y - hy), pN.z), 0).r;
+    float dz = volumeTexture.SampleLevel(samplervolumeTexture, float3(pN.x, pN.y, saturate(pN.z + hz)), 0).r
+            - volumeTexture.SampleLevel(samplervolumeTexture, float3(pN.x, pN.y, saturate(pN.z - hz)), 0).r;
+    return float3(dx, dy, dz) * 0.5;
+}
+
 bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out float errorMm, out float3 dispMm)
 {
     errorMm = 1e10;
@@ -146,8 +164,8 @@ bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out f
     float stepSize = (useNearestVoxel == 1) ? stepSizeCpu : stepSizeFast;
     float maxDist = maxU; // world units
     
-    // Find volume surface by marching along ray
-    float3 volumeHitPoint = worldPos; // Default fallback
+    // Find volume surface by marching along ray (forward direction)
+    float3 volumeHitPoint = worldPos; // working value
     bool foundVolume = false;
     
     // Ensure start is outside the volume if possible (handle local/world coherently)
@@ -203,7 +221,6 @@ bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out f
         // CPU parity: march in local space and stop at AABB exit or maxU
         float3 startLocal = mul(worldToLocal, float4(startPos, 1)).xyz;
         float3 dirLocal = normalize(mul(worldToLocal, float4(rayDirIn, 0)).xyz);
-        float3 prevLocal = startLocal;
         float prevDLocal = -1.0;
         for (float tl = 0.0; tl <= 10000.0; tl += stepLocal)
         {
@@ -237,7 +254,6 @@ bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out f
                 }
             }
             prevDLocal = density;
-            prevLocal = localPos;
             prevPos = samplePos;
         }
     }
@@ -281,7 +297,12 @@ bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out f
         }
     }
     
-    if (!foundVolume && tryBothDirections)
+    // Capture forward-direction result
+    bool foundA = foundVolume;
+    float3 hitA = volumeHitPoint;
+    
+    // Also probe reverse direction if enabled
+    if (tryBothDirections)
     {
         // Try reverse direction
     rayStart = worldPos - rayDir * eps;
@@ -404,15 +425,84 @@ bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out f
         }
     }
     
-    if (foundVolume)
-    {
-        float3 diff = (volumeHitPoint - worldPos);
-        errorMm = length(diff) * mmPerUnityUnit;
-        dispMm = diff * mmPerUnityUnit;
-        return true;
-    }
+    // Decide between forward and reverse results
+    bool foundB = foundVolume;
+    float3 hitB = volumeHitPoint;
+    bool foundAny = foundA || foundB;
+    if (!foundAny)
+        return false;
     
-    return false;
+    if (foundA && foundB)
+    {
+        float da = length(hitA - worldPos);
+        float db = length(hitB - worldPos);
+        volumeHitPoint = (da <= db) ? hitA : hitB;
+    }
+    else
+    {
+        volumeHitPoint = foundA ? hitA : hitB;
+    }
+
+    // Optional refinement by bracketing IsVisible crossing and bisection
+    if (enableRefine == 1)
+    {
+        float3 dirToHit = normalize(volumeHitPoint - worldPos);
+        float hi = length(volumeHitPoint - worldPos);
+        float3 hiPos = volumeHitPoint;
+        float3 hiLocal = mul(worldToLocal, float4(hiPos, 1)).xyz + 0.5;
+        bool hiVis = false;
+        if (hiLocal.x >= 0 && hiLocal.y >= 0 && hiLocal.z >= 0 && hiLocal.x <= 1 && hiLocal.y <= 1 && hiLocal.z <= 1)
+        {
+            float d = volumeTexture.SampleLevel(samplervolumeTexture, hiLocal, 0).r;
+            hiVis = IsVisible(d);
+        }
+        float stepRefine = max( (0.1 / mmPerUnityUnit), hi * 0.05 );
+        float lo = max(0.0, hi - stepRefine);
+        float3 loPos = worldPos + dirToHit * lo;
+        bool bracketed = false;
+        [unroll]
+        for (int s = 0; s < 6; s++)
+        {
+            lo = max(0.0, hi - (s+1) * stepRefine);
+            loPos = worldPos + dirToHit * lo;
+            float3 loLocal = mul(worldToLocal, float4(loPos, 1)).xyz + 0.5;
+            bool loVis = false;
+            if (loLocal.x >= 0 && loLocal.y >= 0 && loLocal.z >= 0 && loLocal.x <= 1 && loLocal.y <= 1 && loLocal.z <= 1)
+            {
+                float d = volumeTexture.SampleLevel(samplervolumeTexture, loLocal, 0).r;
+                loVis = IsVisible(d);
+            }
+            if (loVis != hiVis)
+            {
+                bracketed = true;
+                break;
+            }
+        }
+        if (bracketed)
+        {
+            [unroll]
+            for (int it = 0; it < 5; it++)
+            {
+                float mid = 0.5 * (lo + hi);
+                float3 midPos = worldPos + dirToHit * mid;
+                float3 midLocal = mul(worldToLocal, float4(midPos, 1)).xyz + 0.5;
+                bool midVis = false;
+                if (midLocal.x >= 0 && midLocal.y >= 0 && midLocal.z >= 0 && midLocal.x <= 1 && midLocal.y <= 1 && midLocal.z <= 1)
+                {
+                    float d = volumeTexture.SampleLevel(samplervolumeTexture, midLocal, 0).r;
+                    midVis = IsVisible(d);
+                }
+                if (midVis == hiVis) { hi = mid; hiPos = midPos; }
+                else { lo = mid; loPos = midPos; }
+            }
+            volumeHitPoint = hiPos;
+        }
+    }
+
+    float3 diff = (volumeHitPoint - worldPos);
+    errorMm = length(diff) * mmPerUnityUnit;
+    dispMm = diff * mmPerUnityUnit;
+    return true;
 }
 
 float4 MapBandColor(float valMm)
@@ -520,11 +610,20 @@ void CSMain (uint3 id : SV_DispatchThreadID)
                     // Distance weight
                     if (useDistanceWeighting)
                         weight *= exp(-errorMm / maxWeightDistanceMm);
-                    // Angle weight (0 degree has highest weight)
+                    // Angle weight (0 degree has the highest weight)
                     weight *= exp(-abs(angle) / 90.0);
                     // Accuracy weight
                     weight *= 1.0 / (1.0 + errorMm);
                 }
+
+                // Gradient-alignment weighting to down-weight likely wrong-layer hits
+                float3 hitPos = vertexPos + (dispMm / mmPerUnityUnit);
+                float3 pN = mul(worldToLocal, float4(hitPos, 1)).xyz + 0.5;
+                float3 g = SampleGradN(pN);
+                float gLen = length(g);
+                float3 rayIn = normalize(-rayDir);
+                float align = (gLen > 1e-6) ? abs(dot(normalize(g), rayIn)) : 0.0;
+                weight *= (0.6 + 0.4 * saturate(align));
                 
                 rayWeights[validRayCount] = weight;
                 validRayCount++;
@@ -558,7 +657,17 @@ void CSMain (uint3 id : SV_DispatchThreadID)
             if (ProbeDirection(vertexPos, radialDir, eps, maxU, errorMm, dispMm))
             {
                 rayErrors[validRayCount] = errorMm;
-                rayWeights[validRayCount] = 0.5; // Lower weight for aggressive samples
+                // Base weight for aggressive samples
+                float weightR = 0.5;
+                // Gradient alignment penalty to reduce wrong-layer picks
+                float3 hitPosR = vertexPos + (dispMm / mmPerUnityUnit);
+                float3 pNR = mul(worldToLocal, float4(hitPosR, 1)).xyz + 0.5;
+                float3 gR = SampleGradN(pNR);
+                float gLenR = length(gR);
+                float3 rayInR = normalize(-radialDir);
+                float alignR = (gLenR > 1e-6) ? abs(dot(normalize(gR), rayInR)) : 0.0;
+                weightR *= (0.6 + 0.4 * saturate(alignR));
+                rayWeights[validRayCount] = weightR;
                 validRayCount++;
                 if (useShortestDistance && errorMm < bestErrorMm) { bestErrorMm = errorMm; bestRay = radialDir; bestVecMm = dispMm; }
             }
@@ -645,5 +754,4 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     errorResults[vertexIndex] = foundHit ? bestErrorMm : -1.0;
     errorVectors[vertexIndex] = foundHit ? bestVecMm : float3(0,0,0);
     vertexColors[vertexIndex] = bestColor;
-    // Removed: per-vertex best ray direction output (debug-only)
 }
