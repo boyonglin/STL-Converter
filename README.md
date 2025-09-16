@@ -6,8 +6,8 @@ A Unity project converts DICOM medical images into 3D printable STL files.
 
 *   **DICOM Import:** Load and Visualize DICOM series.
 *   **Isosurface Extraction:** Generate a 3D mesh from the volume data using the Marching Cubes algorithm.
-*   **STL Export:** Export the generated mesh to an STL file in binary or ASCII format.
-*   **STL Import:** Import models with vertex counts larger than Unity max by automatically splitting into multiple meshes.
+*   **STL Export:** Export the generated mesh to an STL file in binary or ASCII format with finer or cross-section box option.
+*   **Surface Deviation (GPU):** Computes and visualizes the geometric error between an STL model and the source DICOM data.
 
 ## Getting Started
 
@@ -28,11 +28,26 @@ These instructions will get you a copy of the project up and running on your loc
 
 ## Usage
 
+### DICOM to STL Conversion
+
 1.  Load a DICOM series.
-2.  Select a GameObject with the VolumeRenderedObject in Hierarchy or Scene.
-3.  Adjust the visible value range.
-4.  Click Export STL to Binary or ASCII from Tools/Mesh Preview Editor.
-5.  Unity will automatically compile STL files in the Assets folder.
+2.  Select a GameObject with the `VolumeRenderedObject` in the Hierarchy or Scene.
+3.  Adjust the visible value range to define the desired surface.
+4.  From the top menu, go to `Tools/Mesh Preview Editor` and click `Export STL to Binary` or `ASCII`.
+5.  The exported STL file will appear in the `Assets` folder.
+
+### Surface Deviation Analysis
+
+This feature allows you to compare an STL model against the original DICOM volume to assess its accuracy.
+
+1.  Ensure you have both the DICOM volume (with a `VolumeRenderedObject`) and the STL model loaded in your scene.
+2.  Create a GameObject and add the `StlErrorPainterGPU` component to it.
+3.  In the Inspector for `StlErrorPainterGPU`:
+    *   Drag the GameObject containing the `VolumeRenderedObject` to the `Dicom Root` field.
+    *   Drag the parent GameObject of your imported STL mesh(es) to the `Stl Root` field.
+4.  Adjust the parameters under `Probe settings`, `Color mapping`, and `Stats` as needed.
+5.  Click the **GPU Bake Colors** button at the top of the component in Play Mode.
+6.  The STL mesh vertices will be colored to show the deviation from the DICOM surface, and detailed statistics will be logged to the console.
 
 ## Built With
 
