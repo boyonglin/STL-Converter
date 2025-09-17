@@ -501,8 +501,8 @@ public class StlErrorPainterGPU : MonoBehaviour
             float e = errors[i];
             if (e >= 0 && float.IsFinite(e))
             {
-                _allErrors.Add(e); // 收集所有有效樣本，不截斷（用於全域統計）
                 if (clipStatsAboveMaxMm && e > statsMaxMm) { clipped++; continue; }
+                _allErrors.Add(e);
                 valid++; sum += e;
             }
         }
