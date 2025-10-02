@@ -305,7 +305,7 @@ bool ProbeDirection(float3 worldPos, float3 rayDir, float eps, float maxU, out f
     if (tryBothDirections)
     {
         // Try reverse direction
-    rayStart = worldPos - rayDir * eps;
+        rayStart = worldPos - rayDir * eps;
         rayDirIn = rayDir;
 
         // Ensure start outside for reverse too
@@ -576,7 +576,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     [loop]
     for (int i = 0; i < min(angleCount, 32); i++)
     {
-    float angle = 0;
+        float angle = 0;
         if (enableSurfaceSpecificRays)
         {
             if (surfaceType == 0 && i < verticalAngleCount)
@@ -687,21 +687,21 @@ void CSMain (uint3 id : SV_DispatchThreadID)
             mean /= validRayCount;
             
             float variance = 0;
-            for (int i = 0; i < validRayCount; i++)
+            for (int j = 0; j < validRayCount; j++)
             {
-                float diff = rayErrors[i] - mean;
+                float diff = rayErrors[j] - mean;
                 variance += diff * diff;
             }
             float stdDev = sqrt(variance / validRayCount);
             
             // Filter outliers
             int filteredCount = 0;
-            for (int i = 0; i < validRayCount; i++)
+            for (int k = 0; k < validRayCount; k++)
             {
-                if (abs(rayErrors[i] - mean) <= outlierThreshold * stdDev)
+                if (abs(rayErrors[k] - mean) <= outlierThreshold * stdDev)
                 {
-                    rayErrors[filteredCount] = rayErrors[i];
-                    rayWeights[filteredCount] = rayWeights[i];
+                    rayErrors[filteredCount] = rayErrors[k];
+                    rayWeights[filteredCount] = rayWeights[k];
                     filteredCount++;
                 }
             }
