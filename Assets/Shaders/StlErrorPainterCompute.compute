@@ -723,10 +723,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
             }
             
             if (totalWeight > 0.001)
-            {
                 bestErrorMm = weightedError / totalWeight;
-                // Keep bestRay as the shortest so CPU verify uses a sensible direction
-            }
             else
                 bestErrorMm = rayErrors[0]; // Fallback to first result
         }
