@@ -95,16 +95,23 @@ public static class MeshClipper
 
             if (insidePrev && insideCurr)
             {
-                outPoly.Add(curr);
+                if (ShouldAddVertex(curr, outPoly))
+                    outPoly.Add(curr);
             }
             else if (insidePrev && !insideCurr)
             {
-                outPoly.Add(Intersect(prev, curr, distPrev, distCurr));
+                var intersection = Intersect(prev, curr, distPrev, distCurr);
+                if (ShouldAddVertex(intersection, outPoly))
+                    outPoly.Add(intersection);
             }
             else if (!insidePrev && insideCurr)
             {
-                outPoly.Add(Intersect(prev, curr, distPrev, distCurr));
-                outPoly.Add(curr);
+                var intersection = Intersect(prev, curr, distPrev, distCurr);
+                if (ShouldAddVertex(intersection, outPoly))
+                    outPoly.Add(intersection);
+
+                if (ShouldAddVertex(curr, outPoly))
+                    outPoly.Add(curr);
             }
 
             prev = curr;
@@ -125,5 +132,10 @@ public static class MeshClipper
     {
         var t = distA / (distA - distB);
         return a + t * (b - a);
+    }
+    
+    private static bool ShouldAddVertex(Vector3 vertex, List<Vector3> polygon)
+    {
+        return polygon.Count == 0 || (vertex - polygon[^1]).sqrMagnitude > 1e-9f;
     }
 }
