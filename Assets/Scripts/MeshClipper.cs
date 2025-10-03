@@ -95,16 +95,23 @@ public static class MeshClipper
 
             if (insidePrev && insideCurr)
             {
-                outPoly.Add(curr);
+                if (outPoly.Count == 0 || (curr - outPoly[^1]).sqrMagnitude > 1e-9f)
+                    outPoly.Add(curr);
             }
             else if (insidePrev && !insideCurr)
             {
-                outPoly.Add(Intersect(prev, curr, distPrev, distCurr));
+                var intersection = Intersect(prev, curr, distPrev, distCurr);
+                if (outPoly.Count == 0 || (intersection - outPoly[^1]).sqrMagnitude > 1e-9f)
+                    outPoly.Add(intersection);
             }
             else if (!insidePrev && insideCurr)
             {
-                outPoly.Add(Intersect(prev, curr, distPrev, distCurr));
-                outPoly.Add(curr);
+                var intersection = Intersect(prev, curr, distPrev, distCurr);
+                if (outPoly.Count == 0 || (intersection - outPoly[^1]).sqrMagnitude > 1e-9f)
+                    outPoly.Add(intersection);
+
+                if (outPoly.Count == 0 || (curr - outPoly[^1]).sqrMagnitude > 1e-9f)
+                    outPoly.Add(curr);
             }
 
             prev = curr;
