@@ -51,6 +51,25 @@ public static class StlExporter
             Debug.LogWarning($"Computed isoLevel {isoLevel} is outside data range [{dataMin},{dataMax}]. This may produce an empty mesh.");
         }
 
+        // Compute transform parameters
+        var transformScale = volumeObject.transform.lossyScale;
+        transformScale = transformScale == Vector3.zero ? Vector3.one : transformScale;
+        var correctionRotation = Quaternion.Euler(-90f, 0, 0);
+        var transformRotation = volumeObject.transform.rotation * correctionRotation;
+
+        if (clipBox != null)
+        {
+            var voxelSize = new Vector3(
+                dataset.scale.x / dataset.dimX * transformScale.x,
+                dataset.scale.y / dataset.dimY * transformScale.y,
+                dataset.scale.z / dataset.dimZ * transformScale.z);
+            
+            // Clip voxels and seal boundaries
+            voxels = VoxelClipper.ClipByBoxWithBoundary(
+                voxels, width, height, depth, 
+                isoLevel, voxelSize, transformRotation, clipBox);
+        }
+
         // Generate isosurface mesh
         var wasCancelled = false;
         var mesh = IsoSurfaceGenerator.BuildMesh(voxels, width, height, depth, isoLevel, true, doubleSided,
@@ -89,20 +108,8 @@ public static class StlExporter
         }
 
         // Apply scale and pivot correction
-        var transformScale = volumeObject.transform.lossyScale;
-        var correctionRotation = Quaternion.Euler(-90f, 0, 0);
-        var transformRotation = volumeObject.transform.rotation * correctionRotation;
         MeshUtil.ApplyDatasetScaleAndCenter(mesh, dataset, transformScale, transformRotation);
 
-        if (clipBox != null)
-        {
-            var clipped = MeshClipper.ClipByBoxWorld(mesh, clipBox);
-            if (clipped != null && clipped.vertexCount > 0 && clipped.triangles != null && clipped.triangles.Length > 0)
-                mesh = clipped;
-            else
-                Debug.LogWarning("ClipBox produced empty mesh; fallback to original mesh.");
-        }
-        
         // Prompt user for the file path
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
         var suffix = doubleSided ? "_double" : "";
@@ -306,3 +313,4 @@ public static class StlExporter
         writer.Write(sb.ToString());
     }
 }
+

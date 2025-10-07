@@ -24,8 +24,6 @@ public static class MeshUtil
         if (mesh == null || dataset == null)
             return;
 
-        extraScale = extraScale == Vector3.zero ? Vector3.one : extraScale;
-
         var voxelSize = CalculateVoxelSize(dataset, globalScale, extraScale);
         var geometricCenter = CalculateGeometricCenter(dataset, voxelSize, extraRotation);
         
