@@ -11,6 +11,7 @@ public class StlMeshConverter : EditorWindow
     private bool useFinerMesh;
     private const float finerFactor = 1.5f;
     private Transform clipBox;
+    private bool useWatertight = true;
 
     /// <summary>
     /// Initializes the preview renderer.
@@ -154,9 +155,13 @@ public class StlMeshConverter : EditorWindow
         // Make toggles not focusable but keep them enabled and colored
         GUI.SetNextControlName("DoubleSidedToggle");
         isDoubleSided = EditorGUILayout.Toggle("Double Sided", isDoubleSided);
+        GUI.SetNextControlName("WatertightToggle");
+        useWatertight = EditorGUILayout.Toggle("Watertight Mesh", useWatertight);
         GUI.SetNextControlName("FinerMeshToggle");
-        useFinerMesh = EditorGUILayout.Toggle("Finer Mesh", useFinerMesh);
-        if (GUI.GetNameOfFocusedControl() == "DoubleSidedToggle" || GUI.GetNameOfFocusedControl() == "FinerMeshToggle")
+        useFinerMesh = EditorGUILayout.Toggle($"Finer Mesh ({finerFactor}x)", useFinerMesh);
+        if (GUI.GetNameOfFocusedControl() == "DoubleSidedToggle" ||
+            GUI.GetNameOfFocusedControl() == "FinerMeshToggle" ||
+            GUI.GetNameOfFocusedControl() == "WatertightToggle")
         {
             GUI.FocusControl(null);
         }
@@ -171,11 +176,11 @@ public class StlMeshConverter : EditorWindow
         var upsamplingFactor = useFinerMesh ? finerFactor : 1.0f;
         if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor, clipBox);
+            StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor, clipBox, useWatertight);
         }
         if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor, clipBox);
+            StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor, clipBox, useWatertight);
         }
         EditorGUILayout.EndHorizontal();
     }

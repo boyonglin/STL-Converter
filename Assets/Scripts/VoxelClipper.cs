@@ -7,25 +7,6 @@ using System.Threading.Tasks;
 /// </summary>
 public static class VoxelClipper
 {
-    /// <summary>
-    /// Result of voxel clipping operation with original data preserved for accurate error analysis
-    /// </summary>
-    public class ClipResult
-    {
-        public float[] ClippedVoxels;        // For Marching Cubes (with synthetic boundaries)
-        public float[] OriginalVoxels;       // For error calculation (real DICOM data)
-        public bool[] IsSyntheticBoundary;   // Marks which voxels are artificial
-        public int SyntheticVoxelCount;
-        
-        public ClipResult(int voxelCount)
-        {
-            ClippedVoxels = new float[voxelCount];
-            OriginalVoxels = new float[voxelCount];
-            IsSyntheticBoundary = new bool[voxelCount];
-            SyntheticVoxelCount = 0;
-        }
-    }
-    
     public static float[] ClipByBoxWithBoundary(
         float[] voxels,
         int width,
@@ -72,7 +53,7 @@ public static class VoxelClipper
                 
                 var boxLocalX = toBoxLocal.m00 * rotatedX + toBoxLocal.m01 * rotatedY + toBoxLocal.m02 * rotatedZ + toBoxLocal.m03;
                 var boxLocalY = toBoxLocal.m10 * rotatedX + toBoxLocal.m11 * rotatedY + toBoxLocal.m12 * rotatedZ + toBoxLocal.m13;
-                var boxLocalZ = toBoxLocal.m20 * rotatedX + toBoxLocal.m21 * rotatedY + rotMatrix.m22 * rotatedZ + toBoxLocal.m23;
+                var boxLocalZ = toBoxLocal.m20 * rotatedX + toBoxLocal.m21 * rotatedY + toBoxLocal.m22 * rotatedZ + toBoxLocal.m23;
                 
                 var absX = boxLocalX < 0 ? -boxLocalX : boxLocalX;
                 var absY = boxLocalY < 0 ? -boxLocalY : boxLocalY;

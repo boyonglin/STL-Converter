@@ -11,37 +11,23 @@ public static class MeshUtil
     /// </summary>
     /// <param name="mesh">The mesh to transform</param>
     /// <param name="dataset">Volume dataset containing dimensions and scale</param>
-    /// <param name="extraScale">Additional scaling (e.g., vol.transform.lossyScale)</param>
+    /// <param name="voxelSize">Size of each voxel in real-world units (e\.g\. mm or m)</param>
     /// <param name="extraRotation">Additional rotation (e.g., vol.transform.rotation * custom rotation)</param>
-    /// <param name="globalScale">Global scale factor: 1 = mm, 0.001 = m</param>
     public static void ApplyDatasetScaleAndCenter(
         Mesh mesh,
         VolumeDataset dataset,
-        Vector3 extraScale,
-        Quaternion extraRotation,
-        float globalScale = 1f)
+        Vector3 voxelSize,
+        Quaternion extraRotation)
     {
         if (mesh == null || dataset == null)
             return;
 
-        var voxelSize = CalculateVoxelSize(dataset, globalScale, extraScale);
         var geometricCenter = CalculateGeometricCenter(dataset, voxelSize, extraRotation);
         
         TransformMeshVertices(mesh, voxelSize, extraRotation, geometricCenter);
         
         mesh.RecalculateBounds();
         mesh.RecalculateNormals();
-    }
-
-    private static Vector3 CalculateVoxelSize(VolumeDataset dataset, float globalScale, Vector3 extraScale)
-    {
-        var voxelSize = new Vector3(
-            dataset.scale.x / dataset.dimX,
-            dataset.scale.y / dataset.dimY,
-            dataset.scale.z / dataset.dimZ);
-        
-        voxelSize *= globalScale;
-        return Vector3.Scale(voxelSize, extraScale);
     }
 
     private static Vector3 CalculateGeometricCenter(VolumeDataset dataset, Vector3 voxelSize, Quaternion rotation)

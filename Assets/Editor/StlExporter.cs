@@ -15,7 +15,9 @@ public static class StlExporter
     /// <param name="doubleSided">True to create double-sided geometry.</param>
     /// <param name="upsamplingFactor">The factor by which to upsample the mesh.</param>
     /// <param name="clipBox">The cross-section box added from Easy Volume Renderer.</param>
-    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false, float upsamplingFactor = 1.0f, Transform clipBox = null)
+    /// <param name="useWatertight">True to seal clipped boundaries (watertight, no gaps), false for original clipping with gaps.</param>
+    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false, float upsamplingFactor = 1.0f,
+        Transform clipBox = null, bool useWatertight = false)
     {
         if (!volumeObject)
         {
@@ -56,15 +58,14 @@ public static class StlExporter
         transformScale = transformScale == Vector3.zero ? Vector3.one : transformScale;
         var correctionRotation = Quaternion.Euler(-90f, 0, 0);
         var transformRotation = volumeObject.transform.rotation * correctionRotation;
+        var voxelSize = new Vector3(  //  Global scale factor: 1 = mm
+            dataset.scale.x / dataset.dimX * transformScale.x,
+            dataset.scale.y / dataset.dimY * transformScale.y,
+            dataset.scale.z / dataset.dimZ * transformScale.z);
 
-        if (clipBox != null)
+        // Watertight clipping: clip voxels BEFORE mesh generation
+        if (clipBox != null && useWatertight)
         {
-            var voxelSize = new Vector3(
-                dataset.scale.x / dataset.dimX * transformScale.x,
-                dataset.scale.y / dataset.dimY * transformScale.y,
-                dataset.scale.z / dataset.dimZ * transformScale.z);
-            
-            // Clip voxels and seal boundaries
             voxels = VoxelClipper.ClipByBoxWithBoundary(
                 voxels, width, height, depth, 
                 isoLevel, voxelSize, transformRotation, clipBox);
@@ -108,7 +109,14 @@ public static class StlExporter
         }
 
         // Apply scale and pivot correction
-        MeshUtil.ApplyDatasetScaleAndCenter(mesh, dataset, transformScale, transformRotation);
+        MeshUtil.ApplyDatasetScaleAndCenter(mesh, dataset, voxelSize, transformRotation);
+        
+        // Non-watertight clipping: clip mesh AFTER mesh generation
+        if (clipBox != null && !useWatertight)
+        {
+            var clipped = MeshClipper.ClipByBoxWorld(mesh, clipBox);
+            mesh = clipped;
+        }
 
         // Prompt user for the file path
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
@@ -313,4 +321,3 @@ public static class StlExporter
         writer.Write(sb.ToString());
     }
 }
-
