@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityVolumeRendering;
@@ -10,8 +11,8 @@ public class StlMeshConverter : EditorWindow
     private float cameraDistance = 1.0f;
     private bool useFinerMesh;
     private const float finerFactor = 1.5f;
-    private Transform clipBox;
     private bool useWatertight = true;
+    private List<Transform> detectedCutoutBoxes;
 
     /// <summary>
     /// Initializes the preview renderer.
@@ -70,11 +71,23 @@ public class StlMeshConverter : EditorWindow
     }
 
     /// <summary>
+    /// Gets all CutoutBoxes on Layer 7 (CutoutBox) in the scene.
+    /// </summary>
+    private static List<Transform> GetCutoutBoxes()
+    {
+        var cutoutBoxes = FindObjectsByType<CutoutBox>(FindObjectsSortMode.None);
+        return cutoutBoxes
+            .Select(cb => cb.transform)
+            .Where(t => t.gameObject.layer == 7)
+            .ToList();
+    }
+
+    /// <summary>
     /// Called when the GUI is drawn.
     /// </summary>
     public void OnGUI()
     {
-        if (Selection.activeGameObject == null)
+        if (!Selection.activeGameObject)
         {
             EditorGUILayout.LabelField("Please select a VolumeRenderedObject in Hierarchy.");
             return;
@@ -90,6 +103,9 @@ public class StlMeshConverter : EditorWindow
 
         if (previewRenderer == null) Initialize();
         if (previewRenderer == null) return;
+        
+        detectedCutoutBoxes = GetCutoutBoxes();
+        var cutoutBoxCount = detectedCutoutBoxes.Count;
         
         // Handle mouse scroll wheel input for camera distance
         var currentEvent = Event.current;
@@ -108,8 +124,7 @@ public class StlMeshConverter : EditorWindow
 
         foreach (var filter in meshFilters)
         {
-            var meshRenderer = filter.GetComponent<MeshRenderer>();
-            if (meshRenderer)
+            if (filter.TryGetComponent<MeshRenderer>(out var meshRenderer))
             {
                 DrawSelectedMesh(filter.sharedMesh, meshRenderer.sharedMaterial, filter.transform);
             }
@@ -141,16 +156,34 @@ public class StlMeshConverter : EditorWindow
         EditorGUILayout.LabelField(Selection.activeGameObject.name, whiteTextStyle);
         EditorGUILayout.EndHorizontal();
 
+        // CutoutBox count row
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField("Cutout Box", whiteTextStyle, GUILayout.Width(88));
+        
+        // Count inclusive and exclusive cutout boxes
+        var inclusiveCount = detectedCutoutBoxes.Count(t => t.GetComponent<CutoutBox>()?.cutoutType == CutoutType.Inclusive);
+        var exclusiveCount = detectedCutoutBoxes.Count(t => t.GetComponent<CutoutBox>()?.cutoutType == CutoutType.Exclusive);
+        
+        string cutoutBoxText;
+        if (cutoutBoxCount == 0)
+        {
+            cutoutBoxText = "0";
+        }
+        else
+        {
+            var parts = new List<string>();
+            if (inclusiveCount > 0) parts.Add($"{inclusiveCount} inclusive");
+            if (exclusiveCount > 0) parts.Add($"{exclusiveCount} exclusive");
+            cutoutBoxText = string.Join(", ", parts);
+        }
+        
+        EditorGUILayout.LabelField(cutoutBoxText, whiteTextStyle);
+        EditorGUILayout.EndHorizontal();
+
         // Options row
         EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField("Options", whiteTextStyle, GUILayout.Width(88));
         EditorGUILayout.BeginVertical();
-        
-        // Clip Box field
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField("Clip Box", whiteTextStyle, GUILayout.Width(149));
-        clipBox = (Transform)EditorGUILayout.ObjectField(clipBox, typeof(Transform), true);
-        EditorGUILayout.EndHorizontal();
         
         // Make toggles not focusable but keep them enabled and colored
         GUI.SetNextControlName("DoubleSidedToggle");
@@ -176,11 +209,11 @@ public class StlMeshConverter : EditorWindow
         var upsamplingFactor = useFinerMesh ? finerFactor : 1.0f;
         if (GUILayout.Button("Binary (1.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(true, volumeObject, isDoubleSided, upsamplingFactor, clipBox, useWatertight);
+            StlExporter.Export(true, volumeObject, detectedCutoutBoxes, isDoubleSided, upsamplingFactor, useWatertight);
         }
         if (GUILayout.Button("ASCII (4.0x)", GUILayout.ExpandWidth(true)))
         {
-            StlExporter.Export(false, volumeObject, isDoubleSided, upsamplingFactor, clipBox, useWatertight);
+            StlExporter.Export(false, volumeObject, detectedCutoutBoxes, isDoubleSided, upsamplingFactor, useWatertight);
         }
         EditorGUILayout.EndHorizontal();
     }

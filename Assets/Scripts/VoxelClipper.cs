@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using UnityVolumeRendering;
 
@@ -8,7 +9,41 @@ using UnityVolumeRendering;
 /// </summary>
 public static class VoxelClipper
 {
-    public static float[] ClipByBoxWithBoundary(
+    /// <summary>
+    /// Clips voxel data by multiple cutout boxes simultaneously.
+    /// Each voxel is evaluated against all boxes, applying their cutout types.
+    /// </summary>
+    public static float[] ClipByMultipleBoxesWithBoundary(
+        float[] voxels,
+        int width,
+        int height,
+        int depth,
+        float isoLevel,
+        Vector3 voxelSize,
+        Quaternion voxelRotation,
+        List<Transform> clipBoxTransforms)
+    {
+        if (voxels == null || clipBoxTransforms == null || clipBoxTransforms.Count == 0)
+            return voxels;
+
+        // Start from the original voxel array and apply each box in sequence
+        var current = voxels;
+
+        foreach (var transform in clipBoxTransforms)
+        {
+            if (transform == null) continue;
+            
+            var cutoutBox = transform.GetComponent<CutoutBox>();
+            var cutoutType = cutoutBox != null ? cutoutBox.cutoutType : CutoutType.Inclusive;
+            
+            // Apply each box clipping operation sequentially
+            current = ClipByBoxWithBoundary(current, width, height, depth, isoLevel, voxelSize, voxelRotation, transform, cutoutType);
+        }
+
+        return current;
+    }
+
+    private static float[] ClipByBoxWithBoundary(
         float[] voxels,
         int width,
         int height,

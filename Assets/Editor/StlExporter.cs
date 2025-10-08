@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEditor;
@@ -12,28 +13,17 @@ public static class StlExporter
     /// </summary>
     /// <param name="isBinary">True to export in binary format, false for ASCII.</param>
     /// <param name="volumeObject">The VolumeRenderedObject to export.</param>
+    /// <param name="cutoutBoxes">List of CutoutBox transforms detected from Layer 7.</param>
     /// <param name="doubleSided">True to create double-sided geometry.</param>
     /// <param name="upsamplingFactor">The factor by which to upsample the mesh.</param>
-    /// <param name="clipBox">The cross-section box added from Easy Volume Renderer.</param>
     /// <param name="useWatertight">True to seal clipped boundaries (watertight, no gaps), false for original clipping with gaps.</param>
-    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, bool doubleSided = false, float upsamplingFactor = 1.0f,
-        Transform clipBox = null, bool useWatertight = false)
+    public static void Export(bool isBinary, VolumeRenderedObject volumeObject, List<Transform> cutoutBoxes = null,
+        bool doubleSided = false, float upsamplingFactor = 1.0f, bool useWatertight = false)
     {
         if (!volumeObject)
         {
             EditorUtility.DisplayDialog("Selection Error", "Please select a GameObject with a VolumeRenderedObject component.", "OK");
             return;
-        }
-
-        // Detect CutoutBox type (Inclusive or Exclusive)
-        CutoutType cutoutType = CutoutType.Inclusive;  // Default to Inclusive
-        if (clipBox != null)
-        {
-            var cutoutBox = clipBox.GetComponent<CutoutBox>();
-            if (cutoutBox != null)
-            {
-                cutoutType = cutoutBox.cutoutType;
-            }
         }
 
         // Get voxel data and dimensions
@@ -74,12 +64,15 @@ public static class StlExporter
             dataset.scale.y / dataset.dimY * transformScale.y,
             dataset.scale.z / dataset.dimZ * transformScale.z);
 
+        // Check if any cutout boxes are provided
+        var hasCutoutBox = cutoutBoxes is { Count: > 0 };
+        
         // Watertight clipping: clip voxels BEFORE mesh generation
-        if (clipBox != null && useWatertight)
+        if (hasCutoutBox && useWatertight)
         {
-            voxels = VoxelClipper.ClipByBoxWithBoundary(
+            voxels = VoxelClipper.ClipByMultipleBoxesWithBoundary(
                 voxels, width, height, depth, 
-                isoLevel, voxelSize, transformRotation, clipBox, cutoutType);
+                isoLevel, voxelSize, transformRotation, cutoutBoxes);
         }
 
         // Generate isosurface mesh
@@ -123,17 +116,17 @@ public static class StlExporter
         MeshUtil.ApplyDatasetScaleAndCenter(mesh, dataset, voxelSize, transformRotation);
         
         // Non-watertight clipping: clip mesh AFTER mesh generation
-        if (clipBox != null && !useWatertight)
+        if (hasCutoutBox && !useWatertight)
         {
-            var clipped = MeshClipper.ClipByBoxWorld(mesh, clipBox, 1e-4f, cutoutType);
-            mesh = clipped;
+            mesh = MeshClipper.ClipByMultipleBoxesWorld(mesh, cutoutBoxes);
         }
 
         // Prompt user for the file path
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
         var suffix = doubleSided ? "_double" : "";
+        var clipSuffix = hasCutoutBox ? $"_{cutoutBoxes.Count}box" : "";
         var baseName = volumeObject.name.Replace(".dcm", "");
-        var fileName = $"{baseName}{(isBinary ? "_binary" : "_ascii")}{suffix}.stl";
+        var fileName = $"{baseName}{(isBinary ? "_binary" : "_ascii")}{suffix}{clipSuffix}.stl";
         var path = EditorUtility.SaveFilePanel($"Export {typeName}", Application.dataPath, fileName, "stl");
         if (string.IsNullOrEmpty(path)) return;
 
