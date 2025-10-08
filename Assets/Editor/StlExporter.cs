@@ -25,6 +25,17 @@ public static class StlExporter
             return;
         }
 
+        // Detect CutoutBox type (Inclusive or Exclusive)
+        CutoutType cutoutType = CutoutType.Inclusive;  // Default to Inclusive
+        if (clipBox != null)
+        {
+            var cutoutBox = clipBox.GetComponent<CutoutBox>();
+            if (cutoutBox != null)
+            {
+                cutoutType = cutoutBox.cutoutType;
+            }
+        }
+
         // Get voxel data and dimensions
         var dataset = volumeObject.dataset;
         var voxels = dataset.data;
@@ -68,7 +79,7 @@ public static class StlExporter
         {
             voxels = VoxelClipper.ClipByBoxWithBoundary(
                 voxels, width, height, depth, 
-                isoLevel, voxelSize, transformRotation, clipBox);
+                isoLevel, voxelSize, transformRotation, clipBox, cutoutType);
         }
 
         // Generate isosurface mesh
@@ -114,7 +125,7 @@ public static class StlExporter
         // Non-watertight clipping: clip mesh AFTER mesh generation
         if (clipBox != null && !useWatertight)
         {
-            var clipped = MeshClipper.ClipByBoxWorld(mesh, clipBox);
+            var clipped = MeshClipper.ClipByBoxWorld(mesh, clipBox, 1e-4f, cutoutType);
             mesh = clipped;
         }
 

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityVolumeRendering;
 
 public static class MeshClipper
 {
@@ -12,8 +13,9 @@ public static class MeshClipper
     /// <param name="worldMesh">Input mesh in world space (vertices + triangles used).</param>
     /// <param name="box">Transform defining the clipping cube (its local unit cube after TRS).</param>
     /// <param name="eps">Inside tolerance (default 1e-4).</param>
+    /// <param name="cutoutType">Cutout type: Inclusive (keep inside) or Exclusive (keep outside).</param>
     /// <returns>New mesh of clipped geometry; empty mesh if fully outside.</returns>
-    public static Mesh ClipByBoxWorld(Mesh worldMesh, Transform box, float eps = 1e-4f)
+    public static Mesh ClipByBoxWorld(Mesh worldMesh, Transform box, float eps = 1e-4f, CutoutType cutoutType = CutoutType.Inclusive)
     {
         if (worldMesh == null || worldMesh.vertexCount == 0) return worldMesh;
 
@@ -46,9 +48,9 @@ public static class MeshClipper
             // Clip against ±X, ±Y, ±Z
             for (var axis = 0; axis < 3 && polygon.Count > 0; axis++)
             {
-                ClipAxis(polygon, scratch, axis, +1, 0.5f, eps);
+                ClipAxis(polygon, scratch, axis, +1, 0.5f, eps, cutoutType);
                 if (polygon.Count == 0) break;
-                ClipAxis(polygon, scratch, axis, -1, 0.5f, eps);
+                ClipAxis(polygon, scratch, axis, -1, 0.5f, eps, cutoutType);
             }
             if (polygon.Count < 3) continue;
 
@@ -79,18 +81,18 @@ public static class MeshClipper
     }
 
     // Clip polygon in-place against a single half-space defined by axis/sign/half.
-    private static void ClipAxis(List<Vector3> poly, List<Vector3> outPoly, int axis, int sign, float half, float eps)
+    private static void ClipAxis(List<Vector3> poly, List<Vector3> outPoly, int axis, int sign, float half, float eps, CutoutType cutoutType)
     {
         outPoly.Clear();
         if (poly.Count == 0) return;
 
         var prev = poly[^1];
-        var distPrev = DistanceToPlane(prev, axis, sign, half);
+        var distPrev = DistanceToPlane(prev, axis, sign, half, cutoutType);
         var insidePrev = distPrev <= eps;
 
         foreach (var curr in poly)
         {
-            var distCurr = DistanceToPlane(curr, axis, sign, half);
+            var distCurr = DistanceToPlane(curr, axis, sign, half, cutoutType);
             var insideCurr = distCurr <= eps;
 
             if (insidePrev && insideCurr)
@@ -122,10 +124,21 @@ public static class MeshClipper
         poly.AddRange(outPoly);
     }
 
-    private static float DistanceToPlane(Vector3 p, int axis, int sign, float half)
+    private static float DistanceToPlane(Vector3 p, int axis, int sign, float half, CutoutType cutoutType)
     {
         var val = axis == 0 ? p.x : axis == 1 ? p.y : p.z;
-        return (sign > 0) ? (val - half) : (-val - half);
+        
+        // For Inclusive mode: keep points inside the box (distance < 0 when inside)
+        // For Exclusive mode: keep points outside the box (invert the distance calculation)
+        if (cutoutType == CutoutType.Inclusive)
+        {
+            return (sign > 0) ? (val - half) : (-val - half);
+        }
+        else // Exclusive
+        {
+            // Invert the half-space to keep outside instead of inside
+            return (sign > 0) ? (half - val) : (val + half);
+        }
     }
 
     private static Vector3 Intersect(Vector3 a, Vector3 b, float distA, float distB)

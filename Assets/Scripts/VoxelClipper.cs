@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Threading.Tasks;
+using UnityVolumeRendering;
 
 /// <summary>
 /// Clips voxel data in the voxel domain (before Marching Cubes).
@@ -15,7 +16,8 @@ public static class VoxelClipper
         float isoLevel,
         Vector3 voxelSize,
         Quaternion voxelRotation,
-        Transform clipBoxTransform)
+        Transform clipBoxTransform,
+        CutoutType cutoutType = CutoutType.Inclusive)
     {
         if (voxels == null || clipBoxTransform == null)
             return voxels;
@@ -59,14 +61,32 @@ public static class VoxelClipper
                 var absY = boxLocalY < 0 ? -boxLocalY : boxLocalY;
                 var absZ = boxLocalZ < 0 ? -boxLocalZ : boxLocalZ;
                 
-                // Inside box: keep original value; Outside: set below isoLevel
-                if (absX <= halfExtent && absY <= halfExtent && absZ <= halfExtent)
+                var isInsideBox = absX <= halfExtent && absY <= halfExtent && absZ <= halfExtent;
+                
+                // Apply cutout logic based on type
+                if (cutoutType == CutoutType.Inclusive)
                 {
-                    clippedVoxels[idx] = originalValue;
+                    // Inclusive: keep inside box, remove outside
+                    if (isInsideBox)
+                    {
+                        clippedVoxels[idx] = originalValue;
+                    }
+                    else
+                    {
+                        clippedVoxels[idx] = isoLevel - 1.0f;
+                    }
                 }
-                else
+                else // CutoutType.Exclusive
                 {
-                    clippedVoxels[idx] = isoLevel - 1.0f;
+                    // Exclusive: remove inside box, keep outside
+                    if (isInsideBox)
+                    {
+                        clippedVoxels[idx] = isoLevel - 1.0f;
+                    }
+                    else
+                    {
+                        clippedVoxels[idx] = originalValue;
+                    }
                 }
             }
         });
