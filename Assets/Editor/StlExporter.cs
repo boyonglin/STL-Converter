@@ -125,6 +125,8 @@ public static class StlExporter
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
         var suffix = doubleSided ? "_double" : "";
         var clipSuffix = hasCutoutBox ? $"_{cutoutBoxes.Count}box" : "";
+        var waterSuffix = useWatertight ? "_watertight" : "";
+        clipSuffix += waterSuffix;
         var baseName = volumeObject.name.Replace(".dcm", "");
         var fileName = $"{baseName}{(isBinary ? "_binary" : "_ascii")}{suffix}{clipSuffix}.stl";
         var path = EditorUtility.SaveFilePanel($"Export {typeName}", Application.dataPath, fileName, "stl");
@@ -132,7 +134,7 @@ public static class StlExporter
 
         // Export
         if (isBinary)
-            WriteBinaryStlOptimized(mesh, path);
+            WriteBinaryStl(mesh, path);
         else
             WriteAsciiStl(mesh, path);
 
@@ -140,9 +142,9 @@ public static class StlExporter
     }
 
     /// <summary>
-    /// Optimized binary STL writer with improved performance
+    /// Binary STL writer using unsafe code for maximum performance
     /// </summary>
-    private static void WriteBinaryStlOptimized(Mesh mesh, string filePath)
+    private static void WriteBinaryStl(Mesh mesh, string filePath)
     {
         var triangles = mesh.triangles;
         var vertices = mesh.vertices;
@@ -271,9 +273,6 @@ public static class StlExporter
         }
     }
 
-    /// <summary>
-    /// Optimized Vector3 writing using BitConverter for better performance
-    /// </summary>
     private static void WriteVector3(BinaryWriter writer, Vector3 vector)
     {
         writer.Write(vector.x);
@@ -282,7 +281,7 @@ public static class StlExporter
     }
     
     /// <summary>
-    /// Optimized ASCII STL writer with StringBuilder pre-sizing
+    /// ASCII STL writer with StringBuilder pre-sizing
     /// </summary>
     private static void WriteAsciiStl(Mesh mesh, string filePath)
     {
