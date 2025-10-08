@@ -5,7 +5,7 @@ A Unity project converts DICOM medical images into 3D printable STL files.
 ## Features
 
 *   **DICOM Import:** Load and Visualize DICOM series.
-*   **Isosurface Extraction:** Generate a 3D mesh from the volume data using the Marching Cubes algorithm.
+*   **Cutout Box:** Provides multiple cutout boxes for mesh and voxel clipping with watertight clipping option.
 *   **STL Export:** Export the generated mesh to an STL file in binary or ASCII format with finer or cross-section box option.
 *   **Surface Deviation (GPU):** Computes and visualizes the geometric error between an STL model and the source DICOM data.
 
