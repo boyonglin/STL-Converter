@@ -167,7 +167,7 @@ public class StlMeshConverter : EditorWindow
         string cutoutBoxText;
         if (cutoutBoxCount == 0)
         {
-            cutoutBoxText = "0";
+            cutoutBoxText = "0 (Assign objects to Layer 7 to include them)";
         }
         else
         {
