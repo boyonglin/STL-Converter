@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityVolumeRendering;
-
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -35,16 +34,16 @@ public class StlErrorPainterGPU : MonoBehaviour
     
     [Header("Multi-directional sampling")]
     public bool enableMultiDirectional = true;
-    public float[] rayAngleOffsets = new float[] {0f, 10f, 20f, 30f, 45f, 60f, 75f, 90f};
+    public float[] rayAngleOffsets = {0f, 10f, 20f, 30f, 45f, 60f, 75f, 90f};
     public bool useShortestDistance = true;
     
     [Header("Surface-specific optimization")]
     public bool enableSurfaceSpecificRays = true;
     public float verticalThreshold = 0.75f;
     public float horizontalThreshold = 0.25f;
-    public float[] verticalAngles = new float[] {0f, 15f, 30f, 45f, 60f, 75f, 90f, 105f, 120f, 135f, -15f, -30f, -45f, -60f, -75f, -90f};
-    public float[] horizontalAngles = new float[] {0f, 10f, 20f, 30f, 40f, 50f, 60f, 70f, 80f, 90f};
-    public float[] obliqueAngles = new float[] {0f, 12f, 25f, 37f, 50f, 62f, 75f, 87f, -12f, -25f, -37f, -50f, -62f, -75f};
+    public float[] verticalAngles = {0f, 15f, 30f, 45f, 60f, 75f, 90f, 105f, 120f, 135f, -15f, -30f, -45f, -60f, -75f, -90f};
+    public float[] horizontalAngles = {0f, 10f, 20f, 30f, 40f, 50f, 60f, 70f, 80f, 90f};
+    public float[] obliqueAngles = {0f, 12f, 25f, 37f, 50f, 62f, 75f, 87f, -12f, -25f, -37f, -50f, -62f, -75f};
     
     [Header("Aggressive sampling")]
     public bool enableAggressiveSampling = true;
@@ -61,29 +60,29 @@ public class StlErrorPainterGPU : MonoBehaviour
     public int minValidSamples = 4;
 
     [Header("Color mapping")]
-    public float[] bandEdgesMm = new float[] {0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f};
-    public Color[] bandColors = new Color[] {
-        new Color(0.10f, 0.65f, 1f),
-        new Color(0.25f, 0.80f, 0.9f),
-        new Color(0.40f, 0.90f, 0.60f),
-        new Color(0.85f, 0.95f, 0.20f),
-        new Color(0.98f, 0.80f, 0.20f),
-        new Color(0.98f, 0.55f, 0.20f),
-        new Color(0.95f, 0.30f, 0.20f),
-        new Color(0.85f, 0.15f, 0.15f),
-        new Color(0.70f, 0.10f, 0.10f),
-        new Color(0.55f, 0.05f, 0.05f)
+    public float[] bandEdgesMm = {0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f};
+    public Color[] bandColors = {
+        new(0.10f, 0.65f, 1f),
+        new(0.25f, 0.80f, 0.9f),
+        new(0.40f, 0.90f, 0.60f),
+        new(0.85f, 0.95f, 0.20f),
+        new(0.98f, 0.80f, 0.20f),
+        new(0.98f, 0.55f, 0.20f),
+        new(0.95f, 0.30f, 0.20f),
+        new(0.85f, 0.15f, 0.15f),
+        new(0.70f, 0.10f, 0.10f),
+        new(0.55f, 0.05f, 0.05f)
     };
     
     [Header("Color range")]
-    public float colorMinMm = 0f;
+    public float colorMinMm;
     public float colorMaxMm = 0.3f; // Increased from 3f to allow higher error visualization
     public bool autoBandsFromRange = true;
-    public bool reverseColorScale = false;
+    public bool reverseColorScale;
 
     [Header("Stats clipping")]
     [Tooltip("Exclude samples with error above this from per-mesh and global statistics. Colors still clamp to Color range.")]
-    public bool clipStatsAboveMaxMm = false; // Disabled by default to include all samples
+    public bool clipStatsAboveMaxMm; // Disabled by default to include all samples
     [Tooltip("Maximum error (mm) to include in statistics when clipping is enabled.")]
     public float statsMaxMm = 20f; // Increased from 3f to match color range
 
@@ -111,9 +110,9 @@ public class StlErrorPainterGPU : MonoBehaviour
     // Volume data
     VolumeRenderedObject primaryVolume;
     Texture3D volumeTexture;
-    readonly List<float> _allErrors = new List<float>(1024);
+    readonly List<float> allErrors = new(1024);
     Texture2D tfTexture;
-    Vector2 visibilityWindow = new Vector2(0f, 1f);
+    Vector2 visibilityWindow = new(0f, 1f);
     int dimX, dimY, dimZ;
 
     /// <summary>
@@ -133,7 +132,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         Debug.Log("[GPU Painter] Starting GPU bake...");
         
         // 清空前次結果，避免累加舊數據
-        _allErrors.Clear();
+        allErrors.Clear();
         
         if (!dicomRoot || !stlRoot)
         {
@@ -151,7 +150,7 @@ public class StlErrorPainterGPU : MonoBehaviour
             {
                 // Fallback: search by name
                 string[] guids = AssetDatabase.FindAssets("t:ComputeShader StlErrorPainterCompute");
-                if (guids != null && guids.Length > 0)
+                if (guids is { Length: > 0 })
                 {
                     var p = AssetDatabase.GUIDToAssetPath(guids[0]);
                     errorPainterCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(p);
@@ -182,7 +181,10 @@ public class StlErrorPainterGPU : MonoBehaviour
         { 
             tfTexture = primaryVolume.transferFunction != null ? primaryVolume.transferFunction.GetTexture() : null; 
         }
-        catch { }
+        catch
+        {
+            // ignored
+        }
         
         visibilityWindow = primaryVolume.GetVisibilityWindow();
         dimX = primaryVolume.dataset.dimX; 
@@ -257,17 +259,17 @@ public class StlErrorPainterGPU : MonoBehaviour
     }
 
 #if UNITY_EDITOR
-    IEnumerator _editorCo;
+    IEnumerator editorCo;
     void StartEditorCoroutine(IEnumerator co)
     {
-        _editorCo = co;
+        editorCo = co;
         EditorApplication.update += EditorUpdate;
     }
     void EditorUpdate()
     {
-        if (_editorCo == null) { EditorApplication.update -= EditorUpdate; return; }
-        try { if (!_editorCo.MoveNext()) { _editorCo = null; EditorApplication.update -= EditorUpdate; } }
-        catch { _editorCo = null; EditorApplication.update -= EditorUpdate; }
+        if (editorCo == null) { EditorApplication.update -= EditorUpdate; return; }
+        try { if (!editorCo.MoveNext()) { editorCo = null; EditorApplication.update -= EditorUpdate; } }
+        catch { editorCo = null; EditorApplication.update -= EditorUpdate; }
     }
 #endif
 
@@ -302,15 +304,15 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
         else
         {
-            yield return StartCoroutine(ProcessMeshGPUSingle(meshFilter, worldVertices, worldNormals, 0, vertexCount));
+            yield return StartCoroutine(ProcessMeshGPUSingle(meshFilter, worldVertices, worldNormals, vertexCount));
         }
     }
 
     IEnumerator ProcessMeshGPUBatched(MeshFilter meshFilter, Vector3[] worldVertices, Vector3[] worldNormals)
     {
         int totalVertices = worldVertices.Length;
-        var allColors = new Color[totalVertices];
-        var allErrors = new float[totalVertices];
+        var meshColors = new Color[totalVertices];
+        var meshErrors = new float[totalVertices];
 
         int batchCount = Mathf.CeilToInt((float)totalVertices / maxVerticesPerBatch);
         Debug.Log($"[GPU Painter] Large mesh detected. Processing {totalVertices} vertices in {batchCount} batches of max {maxVerticesPerBatch} vertices each.");
@@ -324,17 +326,17 @@ public class StlErrorPainterGPU : MonoBehaviour
             Debug.Log($"[GPU Painter] Processing batch {batch + 1}/{batchCount}: vertices {startIdx}-{endIdx - 1} ({batchSize} vertices)");
 
             // Process this batch and store results directly
-            yield return StartCoroutine(ProcessMeshGPUSingleBatch(worldVertices, worldNormals, startIdx, batchSize, allColors, allErrors));
+            yield return StartCoroutine(ProcessMeshGPUSingleBatch(worldVertices, worldNormals, startIdx, batchSize, meshColors, meshErrors));
 
             // Allow frame to breathe between batches
             yield return new WaitForEndOfFrame();
         }
 
         // Apply final results to mesh
-        ApplyResultsToMesh(meshFilter, allColors, allErrors);
+        ApplyResultsToMesh(meshFilter, meshColors, meshErrors);
     }
 
-    IEnumerator ProcessMeshGPUSingleBatch(Vector3[] worldVertices, Vector3[] worldNormals, int startIdx, int batchSize, Color[] allColors, float[] allErrors)
+    IEnumerator ProcessMeshGPUSingleBatch(Vector3[] worldVertices, Vector3[] worldNormals, int startIdx, int batchSize, Color[] meshColors, float[] meshErrors)
     {
         // Create batch arrays
         var batchVertices = new Vector3[batchSize];
@@ -364,7 +366,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         bandColorBuffer.SetData(colors4);
 
         // Validate bands to avoid GPU OOB reads
-        int desiredBandCount = bandColors != null ? bandColors.Length : 0;
+        int desiredBandCount = bandColors?.Length ?? 0;
         int effectiveBandCount = Mathf.Min(desiredBandCount, edges != null ? (edges.Length + 1) : 0);
         if (!autoBandsFromRange && bandEdgesMm != null && desiredBandCount > 0 && (bandEdgesMm.Length < desiredBandCount - 1))
         {
@@ -405,8 +407,8 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
 
         // Copy results back to main arrays
-        Array.Copy(colors, 0, allColors, startIdx, batchSize);
-        Array.Copy(errors, 0, allErrors, startIdx, batchSize);
+        Array.Copy(colors, 0, meshColors, startIdx, batchSize);
+        Array.Copy(errors, 0, meshErrors, startIdx, batchSize);
 
         // Cleanup buffers for this batch
         ReleaseBuffers();
@@ -415,7 +417,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         yield return true;
     }
 
-    IEnumerator ProcessMeshGPUSingle(MeshFilter meshFilter, Vector3[] worldVertices, Vector3[] worldNormals, int startIdx, int count)
+    IEnumerator ProcessMeshGPUSingle(MeshFilter meshFilter, Vector3[] worldVertices, Vector3[] worldNormals, int count)
     {
         // Create GPU buffers
         CreateBuffers(count);
@@ -438,7 +440,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         bandColorBuffer.SetData(colors4);
 
         // Validate bands to avoid GPU OOB reads
-        int desiredBandCount = bandColors != null ? bandColors.Length : 0;
+        int desiredBandCount = bandColors?.Length ?? 0;
         int effectiveBandCount = Mathf.Min(desiredBandCount, edges != null ? (edges.Length + 1) : 0);
         if (!autoBandsFromRange && bandEdgesMm != null && desiredBandCount > 0 && (bandEdgesMm.Length < desiredBandCount - 1))
         {
@@ -487,51 +489,46 @@ public class StlErrorPainterGPU : MonoBehaviour
     void ApplyResultsToMesh(MeshFilter meshFilter, Color[] colors, float[] errors)
     {
         // Apply colors to mesh (use instance to avoid changing shared mesh across duplicates)
-        var renderer = meshFilter.GetComponent<MeshRenderer>();
-        Mesh instanceMesh = meshFilter.mesh; // creates instance if needed
+        var meshRenderer = meshFilter.GetComponent<MeshRenderer>();
+        var instanceMesh = meshFilter.mesh; // creates instance if needed
         instanceMesh.colors = colors;
         
         // Apply vertex color material
-        if (assignVertexColorMaterial && renderer)
+        if (assignVertexColorMaterial && meshRenderer)
         {
             var shader = Shader.Find("Unlit/VertexColor");
             if (shader)
             {
                 // Ensure all submeshes have a material that shows vertex colors
-                var mats = renderer.sharedMaterials;
+                var mats = meshRenderer.sharedMaterials;
                 if (mats == null || mats.Length == 0)
                 {
                     mats = new Material[instanceMesh.subMeshCount > 0 ? instanceMesh.subMeshCount : 1];
                 }
                 for (int i = 0; i < mats.Length; i++)
                 {
-                    if (mats[i] == null || mats[i].shader != shader)
+                    if (!mats[i] || mats[i].shader != shader)
                     {
                         var material = new Material(shader) { name = "GPU Vertex Color (STL error)" };
                         mats[i] = material;
                     }
                 }
-                renderer.sharedMaterials = mats;
+                meshRenderer.sharedMaterials = mats;
             }
             else
             {
-                Debug.LogWarning($"[GPU Painter] Shader 'Unlit/VertexColor' not found. Material assignment skipped.");
+                Debug.LogWarning("[GPU Painter] Shader 'Unlit/VertexColor' not found. Material assignment skipped.");
             }
-        }
-        else
-        {
-            Debug.LogWarning($"[GPU Painter] Renderer or material missing for {meshFilter.name}. Vertex color assignment skipped.");
         }
 
         // Calculate stats for this mesh
         int valid = 0; double sum = 0; int clipped = 0;
-        for (int i = 0; i < errors.Length; i++)
+        foreach (var e in errors)
         {
-            float e = errors[i];
             if (e >= 0 && float.IsFinite(e))
             {
                 if (clipStatsAboveMaxMm && e > statsMaxMm) { clipped++; continue; }
-                _allErrors.Add(e);
+                allErrors.Add(e);
                 valid++; sum += e;
             }
         }
@@ -574,82 +571,82 @@ public class StlErrorPainterGPU : MonoBehaviour
         int kernel = errorPainterCompute.FindKernel("CSMain");
 
         // Set buffers
-        errorPainterCompute.SetBuffer(kernel, "vertexPositions", vertexPosBuffer);
-        errorPainterCompute.SetBuffer(kernel, "vertexNormals", vertexNormalBuffer);
-        errorPainterCompute.SetBuffer(kernel, "vertexColors", vertexColorBuffer);
-        errorPainterCompute.SetBuffer(kernel, "errorResults", errorResultBuffer);
-        errorPainterCompute.SetBuffer(kernel, "errorVectors", errorVectorBuffer);
-        errorPainterCompute.SetBuffer(kernel, "rayAngleOffsets", rayAngleBuffer);
-        errorPainterCompute.SetBuffer(kernel, "verticalAngles", verticalAngleBuffer);
-        errorPainterCompute.SetBuffer(kernel, "horizontalAngles", horizontalAngleBuffer);
-        errorPainterCompute.SetBuffer(kernel, "obliqueAngles", obliqueAngleBuffer);
-        errorPainterCompute.SetBuffer(kernel, "bandEdges", bandEdgeBuffer);
-        errorPainterCompute.SetBuffer(kernel, "bandColors", bandColorBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("vertexPositions"), vertexPosBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("vertexNormals"), vertexNormalBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("vertexColors"), vertexColorBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("errorResults"), errorResultBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("errorVectors"), errorVectorBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("rayAngleOffsets"), rayAngleBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("verticalAngles"), verticalAngleBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("horizontalAngles"), horizontalAngleBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("obliqueAngles"), obliqueAngleBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("bandEdges"), bandEdgeBuffer);
+        errorPainterCompute.SetBuffer(kernel, Shader.PropertyToID("bandColors"), bandColorBuffer);
 
         // Set volume texture
-        errorPainterCompute.SetTexture(kernel, "volumeTexture", volumeTexture);
+        errorPainterCompute.SetTexture(kernel, Shader.PropertyToID("volumeTexture"), volumeTexture);
         if (tfTexture != null)
         {
-            errorPainterCompute.SetTexture(kernel, "tfTexture", tfTexture);
-            errorPainterCompute.SetInt("useTransferFunction", 1);
+            errorPainterCompute.SetTexture(kernel, Shader.PropertyToID("tfTexture"), tfTexture);
+            errorPainterCompute.SetInt(Shader.PropertyToID("useTransferFunction"), 1);
         }
         else
         {
-            errorPainterCompute.SetInt("useTransferFunction", 0);
+            errorPainterCompute.SetInt(Shader.PropertyToID("useTransferFunction"), 0);
         }
-        errorPainterCompute.SetVector("visibilityWindow", visibilityWindow);
-        errorPainterCompute.SetInts("volumeDims", new int[]{dimX, dimY, dimZ});
+        errorPainterCompute.SetVector(Shader.PropertyToID("visibilityWindow"), visibilityWindow);
+        errorPainterCompute.SetInts(Shader.PropertyToID("volumeDims"), dimX, dimY, dimZ);
 
         // Use volumeContainerObject transform (matches VolumeRaycaster)
-        var container = primaryVolume.volumeContainerObject != null ? primaryVolume.volumeContainerObject.transform : primaryVolume.transform;
-        errorPainterCompute.SetMatrix("worldToLocal", container.worldToLocalMatrix);
-        errorPainterCompute.SetMatrix("localToWorld", container.localToWorldMatrix);
+        var container = primaryVolume.volumeContainerObject ? primaryVolume.volumeContainerObject.transform : primaryVolume.transform;
+        errorPainterCompute.SetMatrix(Shader.PropertyToID("worldToLocal"), container.worldToLocalMatrix);
+        errorPainterCompute.SetMatrix(Shader.PropertyToID("localToWorld"), container.localToWorldMatrix);
 
         // Probe parameters
-        errorPainterCompute.SetFloat("mmPerUnityUnit", mmPerUnityUnit);
-        errorPainterCompute.SetFloat("surfaceEpsMm", surfaceEpsMm);
-        errorPainterCompute.SetFloat("maxProbeMm", maxProbeMm);
-        errorPainterCompute.SetInt("tryBothDirections", tryBothDirections ? 1 : 0);
-        errorPainterCompute.SetFloat("densityThreshold", densityThreshold);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("mmPerUnityUnit"), mmPerUnityUnit);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("surfaceEpsMm"), surfaceEpsMm);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("maxProbeMm"), maxProbeMm);
+        errorPainterCompute.SetInt(Shader.PropertyToID("tryBothDirections"), tryBothDirections ? 1 : 0);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("densityThreshold"), densityThreshold);
         // Explicitly use interpolated sampling, not nearest-voxel parity
-        errorPainterCompute.SetInt("useNearestVoxel", 0);
-        errorPainterCompute.SetInt("enableRefine", enableRefinedIntersection ? 1 : 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("useNearestVoxel"), 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("enableRefine"), enableRefinedIntersection ? 1 : 0);
 
         // Sampling parameters
-        errorPainterCompute.SetInt("rayAngleCount", rayAngleOffsets.Length);
-        errorPainterCompute.SetInt("enableMultiDirectional", enableMultiDirectional ? 1 : 0);
-        errorPainterCompute.SetInt("useShortestDistance", useShortestDistance ? 1 : 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("rayAngleCount"), rayAngleOffsets.Length);
+        errorPainterCompute.SetInt(Shader.PropertyToID("enableMultiDirectional"), enableMultiDirectional ? 1 : 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("useShortestDistance"), useShortestDistance ? 1 : 0);
 
         // Surface-specific parameters
-        errorPainterCompute.SetInt("enableSurfaceSpecificRays", enableSurfaceSpecificRays ? 1 : 0);
-        errorPainterCompute.SetInt("verticalAngleCount", verticalAngles.Length);
-        errorPainterCompute.SetInt("horizontalAngleCount", horizontalAngles.Length);
-        errorPainterCompute.SetInt("obliqueAngleCount", obliqueAngles.Length);
-        errorPainterCompute.SetFloat("verticalThreshold", verticalThreshold);
-        errorPainterCompute.SetFloat("horizontalThreshold", horizontalThreshold);
+        errorPainterCompute.SetInt(Shader.PropertyToID("enableSurfaceSpecificRays"), enableSurfaceSpecificRays ? 1 : 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("verticalAngleCount"), verticalAngles.Length);
+        errorPainterCompute.SetInt(Shader.PropertyToID("horizontalAngleCount"), horizontalAngles.Length);
+        errorPainterCompute.SetInt(Shader.PropertyToID("obliqueAngleCount"), obliqueAngles.Length);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("verticalThreshold"), verticalThreshold);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("horizontalThreshold"), horizontalThreshold);
 
         // Aggressive sampling
-        errorPainterCompute.SetInt("enableAggressiveSampling", enableAggressiveSampling ? 1 : 0);
-        errorPainterCompute.SetInt("aggressiveRayCount", aggressiveRayCount);
-        errorPainterCompute.SetFloat("aggressiveMaxAngle", aggressiveMaxAngle);
-        errorPainterCompute.SetInt("radialDirectionCount", radialDirectionCount);
+        errorPainterCompute.SetInt(Shader.PropertyToID("enableAggressiveSampling"), enableAggressiveSampling ? 1 : 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("aggressiveRayCount"), aggressiveRayCount);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("aggressiveMaxAngle"), aggressiveMaxAngle);
+        errorPainterCompute.SetInt(Shader.PropertyToID("radialDirectionCount"), radialDirectionCount);
 
         // Color mapping
-        errorPainterCompute.SetInt("bandCount", bandCountParam);
-        errorPainterCompute.SetFloat("colorMinMm", colorMinMm);
-        errorPainterCompute.SetFloat("colorMaxMm", colorMaxMm);
-        errorPainterCompute.SetInt("reverseColorScale", reverseColorScale ? 1 : 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("bandCount"), bandCountParam);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("colorMinMm"), colorMinMm);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("colorMaxMm"), colorMaxMm);
+        errorPainterCompute.SetInt(Shader.PropertyToID("reverseColorScale"), reverseColorScale ? 1 : 0);
 
         // Advanced optimization
-        errorPainterCompute.SetInt("enableErrorWeighting", enableErrorWeighting ? 1 : 0);
-        errorPainterCompute.SetInt("useDistanceWeighting", useDistanceWeighting ? 1 : 0);
-        errorPainterCompute.SetFloat("maxWeightDistanceMm", maxWeightDistanceMm);
-        errorPainterCompute.SetInt("enableOutlierFiltering", enableOutlierFiltering ? 1 : 0);
-        errorPainterCompute.SetFloat("outlierThreshold", outlierThreshold);
-        errorPainterCompute.SetInt("minValidSamples", minValidSamples);
+        errorPainterCompute.SetInt(Shader.PropertyToID("enableErrorWeighting"), enableErrorWeighting ? 1 : 0);
+        errorPainterCompute.SetInt(Shader.PropertyToID("useDistanceWeighting"), useDistanceWeighting ? 1 : 0);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("maxWeightDistanceMm"), maxWeightDistanceMm);
+        errorPainterCompute.SetInt(Shader.PropertyToID("enableOutlierFiltering"), enableOutlierFiltering ? 1 : 0);
+        errorPainterCompute.SetFloat(Shader.PropertyToID("outlierThreshold"), outlierThreshold);
+        errorPainterCompute.SetInt(Shader.PropertyToID("minValidSamples"), minValidSamples);
 
         // Vertex count
-        errorPainterCompute.SetInt("vertexCount", vertexCount);
+        errorPainterCompute.SetInt(Shader.PropertyToID("vertexCount"), vertexCount);
     }
 
     float[] GenerateAutoEdges()
@@ -671,7 +668,7 @@ public class StlErrorPainterGPU : MonoBehaviour
 
     void CalculateStatistics(MeshFilter[] meshFilters)
     {
-        var stats = ComputeGlobalStats(_allErrors, meshFilters);
+        var stats = ComputeGlobalStats(allErrors, meshFilters);
         if (stats.sampleCount == 0)
         {
             Debug.LogWarning("[GPU Painter] No valid error samples captured. Global statistics are unavailable.");
@@ -717,7 +714,7 @@ public class StlErrorPainterGPU : MonoBehaviour
             sum += v;
         }
         stats.mean = (float)(sum / n);
-        stats.p95 = sorted[(int)Mathf.Clamp(Mathf.RoundToInt(0.95f * (n - 1)), 0, n - 1)];
+        stats.p95 = sorted[Mathf.Clamp(Mathf.RoundToInt(0.95f * (n - 1)), 0, n - 1)];
         stats.max = sorted[n - 1];
 
         stats.lmaxMm = ComputeLmaxMm(meshFilters);
