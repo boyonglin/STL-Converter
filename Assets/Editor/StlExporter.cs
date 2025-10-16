@@ -219,66 +219,6 @@ public static class StlExporter
             }
         }
     }
-
-    /// <summary>
-    /// Fallback safe binary STL writer for platforms without unsafe code support
-    /// </summary>
-    private static void WriteBinaryStlSafe(Mesh mesh, string filePath)
-    {
-        var triangles = mesh.triangles;
-        var vertices = mesh.vertices;
-        var normals = mesh.normals;
-
-        using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 65536);
-        using var writer = new BinaryWriter(stream);
-
-        // Write 80-byte header
-        var header = new byte[80];
-        Encoding.ASCII.GetBytes("unity_volumerendering").CopyTo(header, 0);
-        writer.Write(header);
-
-        // Write triangle count
-        writer.Write((uint)(triangles.Length / 3));
-
-        // Pre-convert vertices to reduce repeated array access
-        var vertexData = new Vector3[vertices.Length];
-        vertices.CopyTo(vertexData, 0);
-
-        // Write triangles
-        for (var i = 0; i < triangles.Length; i += 3)
-        {
-            var a = triangles[i];
-            var b = triangles[i + 1];
-            var c = triangles[i + 2];
-
-            // Calculate or use existing normal
-            Vector3 normal;
-            if (normals.Length == vertices.Length)
-            {
-                normal = normals[a];
-            }
-            else
-            {
-                var v1 = vertexData[b] - vertexData[a];
-                var v2 = vertexData[c] - vertexData[a];
-                normal = Vector3.Cross(v1, v2).normalized;
-            }
-
-            WriteVector3(writer, normal);
-            WriteVector3(writer, vertexData[a]);
-            WriteVector3(writer, vertexData[b]);
-            WriteVector3(writer, vertexData[c]);
-
-            writer.Write((ushort)0); // attribute byte count
-        }
-    }
-
-    private static void WriteVector3(BinaryWriter writer, Vector3 vector)
-    {
-        writer.Write(vector.x);
-        writer.Write(vector.y);
-        writer.Write(vector.z);
-    }
     
     /// <summary>
     /// ASCII STL writer with StringBuilder pre-sizing
