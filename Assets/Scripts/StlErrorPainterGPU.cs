@@ -218,6 +218,35 @@ public class StlErrorPainterGPU : MonoBehaviour
         Debug.Log("[GPU Painter] GPU baking completed!");
     }
 
+    // Auto-find dicomRoot and stlRoot if not set
+    private void Awake()
+    {
+        FindSceneRootsIfNeeded();
+    }
+
+    void FindSceneRootsIfNeeded()
+    {
+        if (dicomRoot == null)
+        {
+            var dicomGo = GameObject.Find("dicom");
+            if (dicomGo != null)
+            {
+                dicomRoot = dicomGo.transform;
+                Debug.Log("[GPU Painter] Auto-found dicomRoot: " + dicomRoot.name);
+            }
+        }
+    
+        if (stlRoot == null)
+        {
+            var stlGo = GameObject.Find("stl");
+            if (stlGo != null)
+            {
+                stlRoot = stlGo.transform;
+                Debug.Log("[GPU Painter] Auto-found stlRoot: " + stlRoot.name);
+            }
+        }
+    }
+
     // --- Allow running in Editor or Play Mode ---
     void RunCoroutineSmart(IEnumerator co)
     {
