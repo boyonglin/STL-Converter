@@ -4,9 +4,6 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityVolumeRendering;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 /// <summary>
 /// GPU-accelerated STL error painter that computes surface deviation between STL meshes and DICOM volume data.
@@ -121,7 +118,7 @@ public class StlErrorPainterGPU : MonoBehaviour
     [ContextMenu("GPU Bake Colors")]
     public void BakeGPU()
     {
-        RunCoroutineSmart(BakeGPUCoroutine());
+        StartCoroutine(BakeGPUCoroutine());
     }
 
     /// <summary>
@@ -142,26 +139,8 @@ public class StlErrorPainterGPU : MonoBehaviour
 
         if (!errorPainterCompute)
         {
-            // Try to auto-locate the compute shader in the project (Editor only)
-#if UNITY_EDITOR
-            var path = "Assets/Shaders/StlErrorPainterCompute.compute";
-            errorPainterCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(path);
-            if (!errorPainterCompute)
-            {
-                // Fallback: search by name
-                string[] guids = AssetDatabase.FindAssets("t:ComputeShader StlErrorPainterCompute");
-                if (guids is { Length: > 0 })
-                {
-                    var p = AssetDatabase.GUIDToAssetPath(guids[0]);
-                    errorPainterCompute = AssetDatabase.LoadAssetAtPath<ComputeShader>(p);
-                }
-            }
-#endif
-            if (!errorPainterCompute)
-            {
-                Debug.LogError("[GPU Painter] Compute shader not assigned and auto-locate failed. Assign Assets/Shaders/StlErrorPainterCompute.compute.");
-                yield break;
-            }
+            Debug.LogError("[GPU Painter] Compute shader not assigned and auto-locate failed. Assign Shaders/StlErrorPainterCompute.compute.");
+            yield break;
         }
 
         // Find primary volume
@@ -220,13 +199,14 @@ public class StlErrorPainterGPU : MonoBehaviour
         Debug.Log("[GPU Painter] GPU baking completed!");
     }
 
-    // Auto-find dicomRoot and stlRoot if not set
+    // Auto-locate dicomRoot, stlRoot, and compute shader at runtime
     private void Awake()
     {
-        FindSceneRootsIfNeeded();
+        LocateSceneRoots();
+        LocateComputeShader();
     }
 
-    void FindSceneRootsIfNeeded()
+    void LocateSceneRoots()
     {
         if (dicomRoot == null)
         {
@@ -234,7 +214,7 @@ public class StlErrorPainterGPU : MonoBehaviour
             if (dicomGo != null)
             {
                 dicomRoot = dicomGo.transform;
-                Debug.Log("[GPU Painter] Auto-found dicomRoot: " + dicomRoot.name);
+                Debug.Log("[GPU Painter] Auto-located dicomRoot: " + dicomRoot.name);
             }
         }
     
@@ -244,35 +224,22 @@ public class StlErrorPainterGPU : MonoBehaviour
             if (stlGo != null)
             {
                 stlRoot = stlGo.transform;
-                Debug.Log("[GPU Painter] Auto-found stlRoot: " + stlRoot.name);
+                Debug.Log("[GPU Painter] Auto-located stlRoot: " + stlRoot.name);
             }
         }
     }
 
-    // --- Allow running in Editor or Play Mode ---
-    void RunCoroutineSmart(IEnumerator co)
+    void LocateComputeShader()
     {
-#if UNITY_EDITOR
-        if (!Application.isPlaying) { StartEditorCoroutine(co); return; }
-#endif
-        StartCoroutine(co);
+        const string path = "Shaders/StlErrorPainterCompute";
+        errorPainterCompute = Resources.Load<ComputeShader>(path);
+        if (errorPainterCompute != null)
+        {
+            Debug.Log("[GPU Painter] Auto-located compute shader from Resources/" + path);
+        }
     }
 
-#if UNITY_EDITOR
-    IEnumerator editorCo;
-    void StartEditorCoroutine(IEnumerator co)
-    {
-        editorCo = co;
-        EditorApplication.update += EditorUpdate;
-    }
-    void EditorUpdate()
-    {
-        if (editorCo == null) { EditorApplication.update -= EditorUpdate; return; }
-        try { if (!editorCo.MoveNext()) { editorCo = null; EditorApplication.update -= EditorUpdate; } }
-        catch { editorCo = null; EditorApplication.update -= EditorUpdate; }
-    }
-#endif
-
+    // Runtime coroutine execution
     IEnumerator ProcessMeshGPU(MeshFilter meshFilter)
     {
         var mesh = meshFilter.sharedMesh;
