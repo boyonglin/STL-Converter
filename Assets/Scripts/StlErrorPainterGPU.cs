@@ -105,12 +105,12 @@ public class StlErrorPainterGPU : MonoBehaviour
     ComputeBuffer bandColorBuffer;
 
     // Volume data
-    VolumeRenderedObject primaryVolume;
-    Texture3D volumeTexture;
-    readonly List<float> allErrors = new(1024);
-    Texture2D tfTexture;
-    Vector2 visibilityWindow = new(0f, 1f);
-    int dimX, dimY, dimZ;
+    private VolumeRenderedObject primaryVolume;
+    private Texture3D volumeTexture;
+    private readonly List<float> allErrors = new(1024);
+    private Texture2D tfTexture;
+    private Vector2 visibilityWindow = new(0f, 1f);
+    private int dimX, dimY, dimZ;
 
     /// <summary>
     /// Initiates GPU-accelerated error calculation and color baking for all STL meshes.
@@ -121,10 +121,11 @@ public class StlErrorPainterGPU : MonoBehaviour
         StartCoroutine(BakeGPUCoroutine());
     }
 
+    // ReSharper disable Unity.PerformanceAnalysis
     /// <summary>
     /// Main coroutine that handles the complete GPU baking process.
     /// </summary>
-    IEnumerator BakeGPUCoroutine()
+    private IEnumerator BakeGPUCoroutine()
     {
         Debug.Log("[GPU Painter] Starting GPU bake...");
         
@@ -206,7 +207,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         LocateComputeShader();
     }
 
-    void LocateSceneRoots()
+    private void LocateSceneRoots()
     {
         if (dicomRoot == null)
         {
@@ -229,7 +230,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
     }
 
-    void LocateComputeShader()
+    private void LocateComputeShader()
     {
         const string path = "Shaders/StlErrorPainterCompute";
         errorPainterCompute = Resources.Load<ComputeShader>(path);
@@ -240,7 +241,7 @@ public class StlErrorPainterGPU : MonoBehaviour
     }
 
     // Runtime coroutine execution
-    IEnumerator ProcessMeshGPU(MeshFilter meshFilter)
+    private IEnumerator ProcessMeshGPU(MeshFilter meshFilter)
     {
         var mesh = meshFilter.sharedMesh;
         var vertices = mesh.vertices;
@@ -275,7 +276,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
     }
 
-    IEnumerator ProcessMeshGPUBatched(MeshFilter meshFilter, Vector3[] worldVertices, Vector3[] worldNormals)
+    private IEnumerator ProcessMeshGPUBatched(MeshFilter meshFilter, Vector3[] worldVertices, Vector3[] worldNormals)
     {
         int totalVertices = worldVertices.Length;
         var meshColors = new Color[totalVertices];
@@ -303,7 +304,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         ApplyResultsToMesh(meshFilter, meshColors, meshErrors);
     }
 
-    IEnumerator ProcessMeshGPUSingleBatch(Vector3[] worldVertices, Vector3[] worldNormals, int startIdx, int batchSize, Color[] meshColors, float[] meshErrors)
+    private IEnumerator ProcessMeshGPUSingleBatch(Vector3[] worldVertices, Vector3[] worldNormals, int startIdx, int batchSize, Color[] meshColors, float[] meshErrors)
     {
         // Create batch arrays
         var batchVertices = new Vector3[batchSize];
@@ -384,7 +385,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         yield return true;
     }
 
-    IEnumerator ProcessMeshGPUSingle(MeshFilter meshFilter, Vector3[] worldVertices, Vector3[] worldNormals, int count)
+    private IEnumerator ProcessMeshGPUSingle(MeshFilter meshFilter, Vector3[] worldVertices, Vector3[] worldNormals, int count)
     {
         // Create GPU buffers
         CreateBuffers(count);
@@ -453,7 +454,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         ReleaseBuffers();
     }
 
-    void ApplyResultsToMesh(MeshFilter meshFilter, Color[] colors, float[] errors)
+    private void ApplyResultsToMesh(MeshFilter meshFilter, Color[] colors, float[] errors)
     {
         // Apply colors to mesh (use instance to avoid changing shared mesh across duplicates)
         var meshRenderer = meshFilter.GetComponent<MeshRenderer>();
@@ -513,7 +514,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         }
     }
 
-    void CreateBuffers(int vertexCount)
+    private void CreateBuffers(int vertexCount)
     {
         ReleaseBuffers();
 
@@ -533,7 +534,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         bandColorBuffer = new ComputeBuffer(bandColors.Length, sizeof(float) * 4);
     }
 
-    void SetComputeParameters(int vertexCount, int bandCountParam)
+    private void SetComputeParameters(int vertexCount, int bandCountParam)
     {
         int kernel = errorPainterCompute.FindKernel("CSMain");
 
@@ -552,7 +553,7 @@ public class StlErrorPainterGPU : MonoBehaviour
 
         // Set volume texture
         errorPainterCompute.SetTexture(kernel, Shader.PropertyToID("volumeTexture"), volumeTexture);
-        if (tfTexture != null)
+        if (tfTexture)
         {
             errorPainterCompute.SetTexture(kernel, Shader.PropertyToID("tfTexture"), tfTexture);
             errorPainterCompute.SetInt(Shader.PropertyToID("useTransferFunction"), 1);
@@ -616,7 +617,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         errorPainterCompute.SetInt(Shader.PropertyToID("vertexCount"), vertexCount);
     }
 
-    float[] GenerateAutoEdges()
+    private float[] GenerateAutoEdges()
     {
         float lo = Mathf.Min(colorMinMm, colorMaxMm);
         float hi = Mathf.Max(colorMinMm, colorMaxMm);
@@ -633,7 +634,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         return edges;
     }
 
-    void CalculateStatistics(MeshFilter[] meshFilters)
+    private void CalculateStatistics(MeshFilter[] meshFilters)
     {
         var stats = ComputeGlobalStats(allErrors, meshFilters);
         if (stats.sampleCount == 0)
@@ -646,7 +647,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         Debug.Log($"[GPU Painter] PER95 = {stats.p95:F3} mm ({stats.per95Pct:F2}% of Lmax)  Mean = {stats.mean:F2} mm  Max = {stats.max:F2} mm  DEV@{0.05f:F2}mm = {stats.cov005*100f:F1}%  DEV@{0.30f:F2}mm = {stats.cov030*100f:F1}%  DEV@{1.00f:F2}mm = {stats.cov100*100f:F1}%");
     }
 
-    struct GlobalStats
+    private struct GlobalStats
     {
         public int sampleCount;
         public float mean;
@@ -659,7 +660,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         public float cov100;
     }
 
-    GlobalStats ComputeGlobalStats(List<float> errors, MeshFilter[] meshFilters)
+    private GlobalStats ComputeGlobalStats(List<float> errors, MeshFilter[] meshFilters)
     {
         var stats = new GlobalStats();
         if (errors == null || errors.Count == 0)
@@ -692,7 +693,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         return stats;
     }
 
-    float CoverageBelow(List<float> sortedAsc, float thresholdMm)
+    private float CoverageBelow(List<float> sortedAsc, float thresholdMm)
     {
         if (sortedAsc == null || sortedAsc.Count == 0) return 0f;
         // assumes sorted ascending
@@ -707,7 +708,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         return ans < 0 ? 0f : ((ans + 1) / (float)n);
     }
 
-    float ComputeLmaxMm(MeshFilter[] meshFilters)
+    private float ComputeLmaxMm(MeshFilter[] meshFilters)
     {
         if (meshFilters == null || meshFilters.Length == 0) return 0f;
         bool hasBounds = false;
@@ -747,7 +748,7 @@ public class StlErrorPainterGPU : MonoBehaviour
         return lmaxUnity * mmPerUnityUnit;
     }
 
-    void ReleaseBuffers()
+    private void ReleaseBuffers()
     {
         vertexPosBuffer?.Release();
         vertexNormalBuffer?.Release();
@@ -762,14 +763,13 @@ public class StlErrorPainterGPU : MonoBehaviour
         bandColorBuffer?.Release();
     }
 
-    void OnDestroy()
+    private void OnDestroy()
     {
         ReleaseBuffers();
     }
 
-    void OnDisable()
+    private void OnDisable()
     {
         ReleaseBuffers();
     }
-
 }
