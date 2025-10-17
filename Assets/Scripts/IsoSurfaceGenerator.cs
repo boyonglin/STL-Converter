@@ -21,6 +21,37 @@ public static class IsoSurfaceGenerator
         }
     }
 
+    /// <summary>
+    /// Wrapper for progress reporting that normalizes upsampling and generation phases to 0-1 range.
+    /// Hides implementation detail that there are two separate phases.
+    /// </summary>
+    private class ProgressReporter
+    {
+        private readonly Func<float, bool> onProgress;
+        private const float upsamplingWeight = 0.3f;
+        private const float generationWeight = 0.7f;
+
+        public ProgressReporter(Func<float, bool> onProgress)
+        {
+            this.onProgress = onProgress;
+        }
+
+        public bool ReportUpsamplingProgress(float progress)
+        {
+            return onProgress != null && onProgress(progress * upsamplingWeight);
+        }
+
+        public bool ReportGenerationProgress(float progress)
+        {
+            return onProgress != null && onProgress(upsamplingWeight + progress * generationWeight);
+        }
+
+        public void ReportComplete()
+        {
+            onProgress?.Invoke(1.0f);
+        }
+    }
+
     public static Mesh BuildMesh(
         float[] voxels,
         int width,
@@ -37,11 +68,13 @@ public static class IsoSurfaceGenerator
             return new Mesh();
         }
 
+        var progressReporter = new ProgressReporter(onProgress);
         int origWidth = width, origHeight = height, origDepth = depth;
-        var willUpsample = upsamplingFactor > 1.01f;
-        if (willUpsample)
+
+        // Phase 1: Optional upsampling
+        if (upsamplingFactor > 1.01f)
         {
-            var cancelled = UpsampleVoxelsTrilinear(
+            var upsamplingCancelled = UpsampleVoxelsTrilinear(
                 voxels,
                 width,
                 height,
@@ -51,17 +84,51 @@ public static class IsoSurfaceGenerator
                 out width,
                 out height,
                 out depth,
-                onProgress);
+                progressReporter.ReportUpsamplingProgress);
 
-            if (cancelled)
+            if (upsamplingCancelled)
             {
                 return new Mesh();
             }
         }
 
+        // Phase 2: Generate mesh using marching cubes
+        var (vertices, triangles, generationCancelled) = GenerateMarchingCubesMesh(
+            voxels, width, height, depth, isoLevel, progressReporter.ReportGenerationProgress);
+
+        if (generationCancelled)
+        {
+            return new Mesh();
+        }
+
+        // Phase 3: Optional double-sided mesh
+        if (doubleSided)
+        {
+            MakeDoubleSided(ref vertices, ref triangles);
+        }
+
+        progressReporter.ReportComplete();
+
+        // Phase 4: Build final mesh
+        return BuildFinalMesh(vertices, triangles, smooth, origWidth, origHeight, origDepth, width, height, depth, upsamplingFactor > 1.01f);
+    }
+
+    /// <summary>
+    /// Generates mesh geometry using the marching cubes algorithm in parallel.
+    /// This is a deep module that hides complex parallel processing details.
+    /// </summary>
+    private static (List<Vector3> vertices, List<int> triangles, bool cancelled) GenerateMarchingCubesMesh(
+        float[] voxels,
+        int width,
+        int height,
+        int depth,
+        float isoLevel,
+        Func<float, bool> onProgress)
+    {
         var slice = width * height;
         var estVertsPerThread = Math.Max(1024, (width * height) / 8);
         var estTrisPerThread = estVertsPerThread * 3;
+        
         var buffersTL = new ThreadLocal<LocalBuffers>(
             () => new LocalBuffers(estVertsPerThread, estTrisPerThread),
             trackAllValues: true);
@@ -116,6 +183,7 @@ public static class IsoSurfaceGenerator
             }
         });
 
+        // Progress monitoring loop
         while (!generationTask.IsCompleted)
         {
             if (onProgress != null)
@@ -135,14 +203,29 @@ public static class IsoSurfaceGenerator
 
         if (backgroundException != null || Interlocked.CompareExchange(ref cancelFlag, 0, 0) != 0)
         {
-            // Cancelled or errored: return empty mesh
-            return new Mesh();
+            return (new List<Vector3>(), new List<int>(), true);
         }
 
-        var vertices = new List<Vector3>(doubleSided ? 131072 : 65536);
-        var triangles = new List<int>(doubleSided ? 262144 : 131072);
+        // Merge thread-local buffers into final lists
+        var (vertices, triangles) = MergeThreadLocalBuffers(buffersTL.Values);
 
-        foreach (var buf in buffersTL.Values)
+        try { buffersTL.Dispose(); } catch { }
+        try { mcTL.Dispose(); } catch { }
+
+        return (vertices, triangles, false);
+    }
+
+    /// <summary>
+    /// Merges thread-local vertex and triangle buffers into unified lists.
+    /// Hides the complexity of buffer offset management.
+    /// </summary>
+    private static (List<Vector3> vertices, List<int> triangles) MergeThreadLocalBuffers(
+        IEnumerable<LocalBuffers> buffers)
+    {
+        var vertices = new List<Vector3>(65536);
+        var triangles = new List<int>(131072);
+
+        foreach (var buf in buffers)
         {
             if (buf == null) continue;
             var offset = vertices.Count;
@@ -154,44 +237,61 @@ public static class IsoSurfaceGenerator
             }
         }
 
-        try { buffersTL.Dispose(); } catch { }
-        try { mcTL.Dispose(); } catch { }
+        return (vertices, triangles);
+    }
 
-        if (doubleSided)
+    /// <summary>
+    /// Converts a single-sided mesh into a double-sided mesh by duplicating and flipping triangles.
+    /// </summary>
+    private static void MakeDoubleSided(ref List<Vector3> vertices, ref List<int> triangles)
+    {
+        var dsVerts = new List<Vector3>(vertices.Count * 2);
+        var dsTris = new List<int>(triangles.Count * 2);
+        
+        for (var i = 0; i < triangles.Count; i += 3)
         {
-            var dsVerts = new List<Vector3>(vertices.Count * 2);
-            var dsTris = new List<int>(triangles.Count * 2);
-            for (var i = 0; i < triangles.Count; i += 3)
-            {
-                var a = triangles[i];
-                var b = triangles[i + 1];
-                var c = triangles[i + 2];
-                var v1 = vertices[a];
-                var v2 = vertices[b];
-                var v3 = vertices[c];
-                AddDoubleSidedTriangle(dsVerts, dsTris, v1, v2, v3);
-            }
-            vertices = dsVerts;
-            triangles = dsTris;
+            var a = triangles[i];
+            var b = triangles[i + 1];
+            var c = triangles[i + 2];
+            var v1 = vertices[a];
+            var v2 = vertices[b];
+            var v3 = vertices[c];
+            AddDoubleSidedTriangle(dsVerts, dsTris, v1, v2, v3);
         }
+        
+        vertices = dsVerts;
+        triangles = dsTris;
+    }
 
-        if (onProgress != null)
-        {
-            onProgress(1.0f);
-        }
-
+    /// <summary>
+    /// Builds the final Unity mesh with all post-processing applied.
+    /// </summary>
+    private static Mesh BuildFinalMesh(
+        List<Vector3> vertices,
+        List<int> triangles,
+        bool smooth,
+        int origWidth,
+        int origHeight,
+        int origDepth,
+        int width,
+        int height,
+        int depth,
+        bool wasUpsampled)
+    {
         var mesh = new Mesh
         {
             indexFormat = vertices.Count > 65_534 ? IndexFormat.UInt32 : IndexFormat.UInt16
         };
         mesh.SetVertices(vertices);
         mesh.SetTriangles(triangles, 0);
+        
         if (smooth)
         {
             mesh.RecalculateNormals();
         }
 
-        if (willUpsample)
+        // Scale back to original dimensions if upsampled
+        if (wasUpsampled)
         {
             var scaleX = (float)(origWidth - 1) / (width - 1);
             var scaleY = (float)(origHeight - 1) / (height - 1);
