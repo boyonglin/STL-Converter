@@ -123,12 +123,14 @@ public static class StlExporter
 
         // Prompt user for the file path
         var typeName = isBinary ? "Binary STL" : "ASCII STL";
-        var suffix = doubleSided ? "_double" : "";
-        var clipSuffix = hasCutoutBox ? $"_{cutoutBoxes.Count}box" : "";
-        var waterSuffix = useWatertight ? "_watertight" : "";
-        clipSuffix += waterSuffix;
         var baseName = volumeObject.name.Replace(".dcm", "");
-        var fileName = $"{baseName}{(isBinary ? "_binary" : "_ascii")}{suffix}{clipSuffix}.stl";
+        var typeSuffix = isBinary ? "_bit" : "_ascii";
+        var doubleSuffix = doubleSided ? "_db" : "";
+        var clipSuffix = hasCutoutBox ? $"_{cutoutBoxes.Count}b" : "";
+        var waterSuffix = useWatertight ? "_wt" : "";
+        var finerSuffix = upsamplingFactor > 1.0f ? "_f" : "";
+        clipSuffix += waterSuffix;
+        var fileName = $"{baseName}{typeSuffix}{doubleSuffix}{clipSuffix}{finerSuffix}.stl";
         var path = EditorUtility.SaveFilePanel($"Export {typeName}", Application.dataPath, fileName, "stl");
         if (string.IsNullOrEmpty(path)) return;
 
